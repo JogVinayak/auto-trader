@@ -1,0 +1,225 @@
+.trades-table-container {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-top: 24px;
+}
+
+.trades-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.trades-table-header h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.trades-stats {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.trades-count {
+  font-size: 14px;
+  color: var(--text-secondary);
+  padding: 4px 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+}
+
+.trades-profit {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.trades-table-scroll {
+  overflow-x: auto;
+}
+
+.trades-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1000px;
+}
+
+.trades-table thead tr {
+  border-bottom: 2px solid var(--border);
+}
+
+.trades-table th {
+  padding: 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.trades-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.2s;
+}
+
+.trades-table tbody tr:hover {
+  background: var(--bg-secondary);
+}
+
+.trades-table td {
+  padding: 16px 12px;
+  font-size: 13px;
+}
+
+.date-cell {
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.symbol-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--accent-blue);
+  border-radius: 6px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.strategy-cell {
+  color: var(--text-primary);
+  font-weight: 500;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.trade-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.trade-type.buy {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--accent-green);
+}
+
+.trade-type.sell {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--accent-red);
+}
+
+.quantity-cell {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.price-cell {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.pnl-cell {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.pnl-cell.positive {
+  color: var(--accent-green);
+}
+
+.pnl-cell.negative {
+  color: var(--accent-red);
+}
+
+.pnl-cell.neutral {
+  color: var(--text-secondary);
+}
+
+.pnl-value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.open {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--accent-blue);
+}
+
+.status-badge.closed {
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--text-secondary);
+}
+
+.status-badge.pending {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--accent-orange);
+}
+
+.trades-table-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.trades-table-empty svg {
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.trades-table-empty h3 {
+  font-size: 20px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.trades-table-empty p {
+  font-size: 14px;
+  max-width: 400px;
+}
+
+@media (max-width: 768px) {
+  .trades-table-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .trades-stats {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+}

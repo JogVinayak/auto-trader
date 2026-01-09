@@ -1,0 +1,133 @@
+.dashboard-container {
+  display: flex;
+  width: 100%;
+  min-height: 100vh;
+  background: var(--bg-primary);
+}
+
+.loading-container,
+.error-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 20px;
+  padding: 20px;
+  text-align: center;
+}
+
+.loading-container p,
+.error-container p {
+  color: var(--text-secondary);
+  font-size: 16px;
+}
+
+.error-container h2 {
+  color: var(--accent-red);
+  font-size: 24px;
+}
+
+.main-content {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+}
+
+.main-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.header-left h1 {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.portfolio-info {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.portfolio-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.portfolio-item span {
+  font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+.strategy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+  gap: 24px;
+  margin-top: 24px;
+}
+
+.no-signals {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.no-signals h3 {
+  font-size: 24px;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.no-signals p {
+  font-size: 16px;
+  color: var(--text-secondary);
+  max-width: 500px;
+}
+
+@media (max-width: 1400px) {
+  .strategy-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 16px;
+  }
+
+  .main-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .header-left h1 {
+    font-size: 24px;
+  }
+
+  .portfolio-info {
+    flex-direction: column;
+    gap: 8px;
+  }
+}

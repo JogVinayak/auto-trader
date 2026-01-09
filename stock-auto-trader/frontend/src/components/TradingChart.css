@@ -1,0 +1,11 @@
+.trading-chart-container {
+  width: 100%;
+  background: var(--bg-card);
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.trading-chart {
+  width: 100%;
+}

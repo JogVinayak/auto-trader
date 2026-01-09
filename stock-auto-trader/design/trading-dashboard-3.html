@@ -1,0 +1,2840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SwingTrade Pro - Paper Trading Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0e17;
+            --bg-secondary: #111827;
+            --bg-card: #1a2234;
+            --border: #2d3748;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-orange: #f59e0b;
+            --glow-green: rgba(16, 185, 129, 0.3);
+            --glow-red: rgba(239, 68, 68, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Screener Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(8px);
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal-overlay.hidden {
+            display: none;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .screener-modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            width: 90%;
+            max-width: 700px;
+            padding: 32px;
+            animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        @keyframes slideUp {
+            from { 
+                opacity: 0;
+                transform: translateY(30px) scale(0.95);
+            }
+            to { 
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .modal-header h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .modal-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+
+        .query-editor {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+
+        .query-editor label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .query-editor textarea {
+            width: 100%;
+            height: 120px;
+            background: transparent;
+            border: none;
+            color: var(--accent-green);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            resize: none;
+            outline: none;
+            line-height: 1.6;
+        }
+
+        .query-presets {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 24px;
+        }
+
+        .preset-tag {
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .preset-tag:hover {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-family: inherit;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
+        }
+
+        /* Main Layout */
+        .app-container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar.collapsed {
+            transform: translateX(-280px);
+            position: absolute;
+        }
+
+        .sidebar-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        .logo-text {
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .toggle-btn {
+            width: 36px;
+            height: 36px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .toggle-btn:hover {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .mode-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid var(--accent-orange);
+            border-radius: 10px;
+            font-size: 0.85rem;
+        }
+
+        .mode-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent-orange);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .sidebar-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .section-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+
+        .stock-dropdown {
+            position: relative;
+        }
+
+        .stock-dropdown input {
+            width: 100%;
+            padding: 12px 14px;
+            padding-left: 40px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .stock-dropdown input:focus {
+            border-color: var(--accent-blue);
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+        }
+
+        .stock-list {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 8px;
+        }
+
+        .stock-item {
+            padding: 10px 14px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stock-item:last-child {
+            border-bottom: none;
+        }
+
+        .stock-item:hover {
+            background: var(--bg-secondary);
+        }
+
+        .stock-item.selected {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 3px solid var(--accent-blue);
+        }
+
+        .stock-symbol {
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stock-change {
+            font-size: 0.85rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stock-change.positive {
+            color: var(--accent-green);
+        }
+
+        .stock-change.negative {
+            color: var(--accent-red);
+        }
+
+        .strategy-filter {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .strategy-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .strategy-checkbox:hover {
+            border-color: var(--accent-purple);
+        }
+
+        .strategy-checkbox input {
+            display: none;
+        }
+
+        .strategy-checkbox .checkmark {
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--border);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .strategy-checkbox input:checked + .checkmark {
+            background: var(--accent-purple);
+            border-color: var(--accent-purple);
+        }
+
+        .strategy-checkbox input:checked + .checkmark::after {
+            content: '✓';
+            color: white;
+            font-size: 0.75rem;
+        }
+
+        .shortcut-hint {
+            margin-top: auto;
+            padding: 12px;
+            background: var(--bg-card);
+            border-radius: 10px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .shortcut-hint kbd {
+            background: var(--bg-primary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            border: 1px solid var(--border);
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .main-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .selected-stock-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .selected-stock-info h1 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stock-price {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .stock-price-change {
+            font-size: 1rem;
+            padding: 4px 10px;
+            border-radius: 6px;
+        }
+
+        .stock-price-change.positive {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--accent-green);
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Strategy Cards Grid */
+        .strategy-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+            gap: 20px;
+        }
+
+        .strategy-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+
+        .strategy-card:hover {
+            border-color: var(--accent-purple);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .strategy-header {
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .strategy-name {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .strategy-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+        }
+
+        .strategy-icon.ema { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+        .strategy-icon.rsi { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
+        .strategy-icon.macd { background: linear-gradient(135deg, #10b981, #047857); }
+
+        .strategy-name h3 {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .auto-trade-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .auto-trade-toggle span {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .toggle-switch {
+            width: 48px;
+            height: 26px;
+            background: var(--bg-secondary);
+            border-radius: 13px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .toggle-switch.active {
+            background: var(--accent-green);
+            box-shadow: 0 0 15px var(--glow-green);
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            top: 3px;
+            left: 3px;
+            transition: transform 0.3s;
+        }
+
+        .toggle-switch.active::after {
+            transform: translateX(22px);
+        }
+
+        .chart-container {
+            height: 200px;
+            padding: 16px;
+            position: relative;
+            background: linear-gradient(180deg, transparent 0%, rgba(59, 130, 246, 0.02) 100%);
+        }
+
+        /* Simulated Chart */
+        .chart-placeholder {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .chart-line {
+            position: absolute;
+            bottom: 30%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--accent-blue);
+            clip-path: polygon(0% 50%, 5% 30%, 10% 45%, 15% 20%, 20% 35%, 25% 15%, 30% 40%, 35% 25%, 40% 55%, 45% 35%, 50% 45%, 55% 30%, 60% 50%, 65% 40%, 70% 60%, 75% 45%, 80% 55%, 85% 35%, 90% 50%, 95% 40%, 100% 30%);
+            filter: drop-shadow(0 0 8px var(--accent-blue));
+        }
+
+        .chart-area {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 70%;
+            background: linear-gradient(180deg, rgba(59, 130, 246, 0.15) 0%, transparent 100%);
+            clip-path: polygon(0% 50%, 5% 30%, 10% 45%, 15% 20%, 20% 35%, 25% 15%, 30% 40%, 35% 25%, 40% 55%, 45% 35%, 50% 45%, 55% 30%, 60% 50%, 65% 40%, 70% 60%, 75% 45%, 80% 55%, 85% 35%, 90% 50%, 95% 40%, 100% 30%, 100% 100%, 0% 100%);
+        }
+
+        .chart-signal {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: bold;
+            animation: signalPulse 2s infinite;
+        }
+
+        .chart-signal.buy {
+            background: var(--accent-green);
+            color: white;
+            bottom: 55%;
+            left: 25%;
+        }
+
+        .chart-signal.sell {
+            background: var(--accent-red);
+            color: white;
+            bottom: 35%;
+            left: 70%;
+        }
+
+        @keyframes signalPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .strategy-actions {
+            padding: 12px 20px;
+            display: flex;
+            gap: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .action-btn {
+            flex: 1;
+            padding: 10px;
+            border-radius: 8px;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            font-size: 0.9rem;
+        }
+
+        .action-btn.buy {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--accent-green);
+            border: 1px solid var(--accent-green);
+        }
+
+        .action-btn.buy:hover {
+            background: var(--accent-green);
+            color: white;
+            box-shadow: 0 0 20px var(--glow-green);
+        }
+
+        .action-btn.sell {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--accent-red);
+            border: 1px solid var(--accent-red);
+        }
+
+        .action-btn.sell:hover {
+            background: var(--accent-red);
+            color: white;
+            box-shadow: 0 0 20px var(--glow-red);
+        }
+
+        /* P&L Table */
+        .pnl-section {
+            padding: 16px 20px;
+        }
+
+        .pnl-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .pnl-header h4 {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .pnl-summary {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .pnl-summary.positive { color: var(--accent-green); }
+        .pnl-summary.negative { color: var(--accent-red); }
+
+        .pnl-table {
+            width: 100%;
+            font-size: 0.85rem;
+        }
+
+        .pnl-table th {
+            text-align: left;
+            padding: 8px 0;
+            color: var(--text-secondary);
+            font-weight: 500;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .pnl-table td {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .pnl-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .trade-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .trade-type.buy {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--accent-green);
+        }
+
+        .trade-type.sell {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--accent-red);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+
+        /* Keyboard Shortcuts Indicator */
+        .keyboard-indicator {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 16px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .keyboard-indicator kbd {
+            background: var(--bg-primary);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            border: 1px solid var(--border);
+        }
+
+        /* Strategy Mode Bar */
+        .strategy-mode-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 20px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .strategy-mode-bar.prod-active {
+            background: linear-gradient(90deg, rgba(239, 68, 68, 0.1) 0%, var(--bg-secondary) 100%);
+            border-left: 3px solid var(--accent-red);
+        }
+
+        .mode-selector {
+            display: flex;
+            background: var(--bg-primary);
+            border-radius: 8px;
+            padding: 3px;
+            gap: 2px;
+        }
+
+        .mode-btn {
+            padding: 6px 14px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.8rem;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .mode-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .mode-btn.paper.active {
+            background: var(--accent-orange);
+            color: white;
+        }
+
+        .mode-btn.prod.active {
+            background: var(--accent-red);
+            color: white;
+            animation: prodPulse 2s infinite;
+        }
+
+        @keyframes prodPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+        }
+
+        .mode-icon {
+            font-size: 0.9rem;
+        }
+
+        .strategy-stats {
+            display: flex;
+            gap: 12px;
+        }
+
+        .stat {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .stat.win-rate {
+            color: var(--accent-green);
+        }
+
+        .stat.win-rate.low {
+            color: var(--accent-red);
+        }
+
+        /* Production Confirmation Modal */
+        .prod-confirm-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            backdrop-filter: blur(10px);
+        }
+
+        .prod-confirm-modal.hidden {
+            display: none;
+        }
+
+        .prod-confirm-content {
+            background: var(--bg-card);
+            border: 2px solid var(--accent-red);
+            border-radius: 16px;
+            width: 90%;
+            max-width: 500px;
+            padding: 32px;
+            animation: shake 0.5s ease;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-5px); }
+            40%, 80% { transform: translateX(5px); }
+        }
+
+        .prod-warning-icon {
+            width: 60px;
+            height: 60px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 2px solid var(--accent-red);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            margin: 0 auto 20px;
+        }
+
+        .prod-confirm-content h2 {
+            text-align: center;
+            color: var(--accent-red);
+            margin-bottom: 16px;
+        }
+
+        .prod-confirm-content p {
+            text-align: center;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+
+        .prod-checklist {
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+
+        .prod-checklist-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .prod-checklist-item.pass {
+            color: var(--accent-green);
+        }
+
+        .prod-checklist-item.fail {
+            color: var(--accent-red);
+        }
+
+        .prod-confirm-input {
+            width: 100%;
+            padding: 12px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .prod-confirm-input:focus {
+            outline: none;
+            border-color: var(--accent-red);
+        }
+
+        .prod-confirm-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .prod-confirm-actions .btn {
+            flex: 1;
+        }
+
+        .btn-danger {
+            background: var(--accent-red);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            box-shadow: 0 0 20px var(--glow-red);
+        }
+
+        .btn-danger:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Prod Dashboard Summary */
+        .prod-summary {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(239, 68, 68, 0.05) 100%);
+            border: 1px solid var(--accent-red);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .prod-summary.hidden {
+            display: none;
+        }
+
+        .prod-summary-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .prod-live-indicator {
+            width: 12px;
+            height: 12px;
+            background: var(--accent-red);
+            border-radius: 50%;
+            animation: livePulse 1s infinite;
+        }
+
+        @keyframes livePulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+        }
+
+        .prod-summary h3 {
+            font-size: 1rem;
+            color: var(--accent-red);
+        }
+
+        .prod-strategies-count {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .prod-summary-right {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .prod-capital {
+            text-align: right;
+        }
+
+        .prod-capital-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .prod-capital-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .kill-switch {
+            background: var(--accent-red);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .kill-switch:hover {
+            background: #dc2626;
+            box-shadow: 0 0 20px var(--glow-red);
+        }
+
+        /* Strategy Config Button */
+        .strategy-config-btn {
+            width: 36px;
+            height: 36px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.2s;
+            margin-left: 8px;
+        }
+
+        .strategy-config-btn:hover {
+            background: var(--bg-primary);
+            border-color: var(--accent-blue);
+            transform: rotate(90deg);
+        }
+
+        /* Strategy Conditions Bar */
+        .strategy-conditions-bar {
+            display: flex;
+            gap: 8px;
+            padding: 10px 20px;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+            flex-wrap: wrap;
+        }
+
+        .condition-tag {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+        }
+
+        .condition-tag.buy {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .condition-tag.sell {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .condition-label {
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .condition-tag.buy .condition-value {
+            color: var(--accent-green);
+        }
+
+        .condition-tag.sell .condition-value {
+            color: var(--accent-red);
+        }
+
+        /* Strategy Config Modal */
+        .config-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            backdrop-filter: blur(8px);
+        }
+
+        .config-modal.hidden {
+            display: none;
+        }
+
+        .config-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            width: 95%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: slideUp 0.3s ease;
+        }
+
+        .config-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            background: var(--bg-card);
+            z-index: 10;
+        }
+
+        .config-header h2 {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.3rem;
+        }
+
+        .config-close {
+            width: 36px;
+            height: 36px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 1.2rem;
+            transition: all 0.2s;
+        }
+
+        .config-close:hover {
+            background: var(--accent-red);
+            color: white;
+            border-color: var(--accent-red);
+        }
+
+        .config-body {
+            padding: 24px;
+        }
+
+        .config-tabs {
+            display: flex;
+            gap: 4px;
+            background: var(--bg-secondary);
+            padding: 4px;
+            border-radius: 10px;
+            margin-bottom: 24px;
+        }
+
+        .config-tab {
+            flex: 1;
+            padding: 10px 16px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .config-tab:hover {
+            color: var(--text-primary);
+        }
+
+        .config-tab.active {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .config-section {
+            margin-bottom: 24px;
+        }
+
+        .config-section-title {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .config-section-title::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .config-field {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .config-field label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .config-field label .hint {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            opacity: 0.7;
+        }
+
+        .config-input {
+            padding: 12px 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.95rem;
+            transition: border-color 0.2s;
+        }
+
+        .config-input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .config-input-group {
+            display: flex;
+            align-items: center;
+        }
+
+        .config-input-group .config-input {
+            border-radius: 8px 0 0 8px;
+            flex: 1;
+        }
+
+        .config-input-group .input-suffix {
+            padding: 12px 14px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-left: none;
+            border-radius: 0 8px 8px 0;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .config-select {
+            padding: 12px 14px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.95rem;
+            cursor: pointer;
+        }
+
+        .config-select:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        /* Condition Builder */
+        .condition-builder {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .condition-builder-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .condition-builder-header h4 {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1rem;
+        }
+
+        .condition-builder-header h4.buy {
+            color: var(--accent-green);
+        }
+
+        .condition-builder-header h4.sell {
+            color: var(--accent-red);
+        }
+
+        .add-condition-btn {
+            padding: 6px 12px;
+            background: var(--bg-card);
+            border: 1px dashed var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .add-condition-btn:hover {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+        }
+
+        .condition-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 12px;
+            padding: 12px;
+            background: var(--bg-card);
+            border-radius: 8px;
+            flex-wrap: wrap;
+        }
+
+        .condition-row select,
+        .condition-row input {
+            padding: 8px 12px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
+
+        .condition-row select:focus,
+        .condition-row input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .condition-row .indicator-select {
+            min-width: 140px;
+        }
+
+        .condition-row .operator-select {
+            min-width: 100px;
+        }
+
+        .condition-row .value-input {
+            width: 80px;
+        }
+
+        .condition-row .period-input {
+            width: 60px;
+        }
+
+        .condition-delete {
+            width: 32px;
+            height: 32px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: auto;
+        }
+
+        .condition-delete:hover {
+            background: var(--accent-red);
+            border-color: var(--accent-red);
+            color: white;
+        }
+
+        .condition-logic {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 0;
+        }
+
+        .logic-btn {
+            padding: 4px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .logic-btn.active {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+            color: white;
+        }
+
+        /* Risk Management Section */
+        .risk-slider {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .slider-container input[type="range"] {
+            flex: 1;
+            height: 6px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            -webkit-appearance: none;
+        }
+
+        .slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            background: var(--accent-blue);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .slider-value {
+            min-width: 50px;
+            text-align: right;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent-blue);
+        }
+
+        /* Config Footer */
+        .config-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-top: 1px solid var(--border);
+            background: var(--bg-secondary);
+            position: sticky;
+            bottom: 0;
+        }
+
+        .config-footer-left {
+            display: flex;
+            gap: 12px;
+        }
+
+        .config-footer-right {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        .btn-outline:hover {
+            border-color: var(--text-primary);
+            color: var(--text-primary);
+        }
+
+        .btn-success {
+            background: var(--accent-green);
+            color: white;
+        }
+
+        .btn-success:hover {
+            box-shadow: 0 0 20px var(--glow-green);
+        }
+    </style>
+</head>
+<body>
+    <!-- Screener Modal -->
+    <div class="modal-overlay" id="screenerModal">
+        <div class="screener-modal">
+            <div class="modal-header">
+                <div class="modal-icon">📊</div>
+                <h2>Run Screener Query</h2>
+            </div>
+            
+            <div class="query-editor">
+                <label>Screener Query (Chartink Syntax)</label>
+                <textarea id="screenerQuery">( {cash} ( 
+  latest close > latest ema(close, 20) and 
+  latest rsi(14) > 30 and 
+  latest rsi(14) < 70 and 
+  latest volume > 1.5 * latest sma(volume, 20) 
+) )</textarea>
+            </div>
+
+            <div class="query-presets">
+                <span class="preset-tag" onclick="setPreset('oversold')">RSI Oversold</span>
+                <span class="preset-tag" onclick="setPreset('breakout')">Volume Breakout</span>
+                <span class="preset-tag" onclick="setPreset('ema')">EMA Crossover</span>
+                <span class="preset-tag" onclick="setPreset('supertrend')">Supertrend Buy</span>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="skipScreener()">Skip (Use Default)</button>
+                <button class="btn btn-primary" onclick="runScreener()">
+                    Run Screener →
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Production Confirmation Modal -->
+    <div class="prod-confirm-modal hidden" id="prodConfirmModal">
+
+    <!-- Strategy Configuration Modal -->
+    <div class="config-modal hidden" id="strategyConfigModal">
+        <div class="config-content">
+            <div class="config-header">
+                <h2>
+                    <span id="configStrategyIcon">📈</span>
+                    <span id="configStrategyName">EMA Crossover</span> Configuration
+                </h2>
+                <button class="config-close" onclick="closeStrategyConfig()">×</button>
+            </div>
+
+            <div class="config-body">
+                <!-- Tabs -->
+                <div class="config-tabs">
+                    <button class="config-tab active" onclick="switchConfigTab(this, 'indicators')">📊 Indicators</button>
+                    <button class="config-tab" onclick="switchConfigTab(this, 'signals')">🎯 Buy/Sell Signals</button>
+                    <button class="config-tab" onclick="switchConfigTab(this, 'risk')">🛡️ Risk Management</button>
+                    <button class="config-tab" onclick="switchConfigTab(this, 'backtest')">📈 Backtest</button>
+                </div>
+
+                <!-- Indicators Tab -->
+                <div class="config-tab-content" id="tab-indicators">
+                    <div class="config-section">
+                        <div class="config-section-title">Primary Indicators</div>
+                        <div class="config-grid">
+                            <div class="config-field">
+                                <label>Fast EMA Period</label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="9" min="2" max="50" id="emaFast">
+                                    <span class="input-suffix">candles</span>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label>Slow EMA Period</label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="21" min="5" max="200" id="emaSlow">
+                                    <span class="input-suffix">candles</span>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label>Timeframe</label>
+                                <select class="config-select" id="timeframe">
+                                    <option value="1h">1 Hour</option>
+                                    <option value="4h">4 Hours</option>
+                                    <option value="1d" selected>Daily</option>
+                                    <option value="1w">Weekly</option>
+                                </select>
+                            </div>
+                            <div class="config-field">
+                                <label>Price Source</label>
+                                <select class="config-select" id="priceSource">
+                                    <option value="close" selected>Close</option>
+                                    <option value="open">Open</option>
+                                    <option value="high">High</option>
+                                    <option value="low">Low</option>
+                                    <option value="hl2">HL/2</option>
+                                    <option value="hlc3">HLC/3</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="config-section">
+                        <div class="config-section-title">Confirmation Indicators (Optional)</div>
+                        <div class="config-grid">
+                            <div class="config-field">
+                                <label>
+                                    <input type="checkbox" id="useRSI" checked> RSI Filter
+                                </label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="14" min="2" max="50" id="rsiPeriod">
+                                    <span class="input-suffix">period</span>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label>
+                                    <input type="checkbox" id="useVolume"> Volume Filter
+                                </label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="1.5" step="0.1" min="1" max="5" id="volumeMultiplier">
+                                    <span class="input-suffix">× avg</span>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label>
+                                    <input type="checkbox" id="useSupertrend"> Supertrend
+                                </label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="10" min="1" max="50" id="supertrendPeriod">
+                                    <span class="input-suffix">ATR</span>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label>Supertrend Multiplier</label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="3" step="0.5" min="1" max="10" id="supertrendMult">
+                                    <span class="input-suffix">×</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Signals Tab -->
+                <div class="config-tab-content hidden" id="tab-signals">
+                    <!-- BUY Conditions -->
+                    <div class="condition-builder">
+                        <div class="condition-builder-header">
+                            <h4 class="buy">📈 BUY Conditions</h4>
+                            <button class="add-condition-btn" onclick="addCondition('buy')">+ Add Condition</button>
+                        </div>
+                        
+                        <div id="buyConditions">
+                            <div class="condition-row">
+                                <select class="indicator-select">
+                                    <option value="ema">EMA</option>
+                                    <option value="sma">SMA</option>
+                                    <option value="rsi">RSI</option>
+                                    <option value="macd">MACD</option>
+                                    <option value="price">Price</option>
+                                    <option value="volume">Volume</option>
+                                    <option value="supertrend">Supertrend</option>
+                                </select>
+                                <input type="number" class="period-input" value="9" placeholder="Period">
+                                <select class="operator-select">
+                                    <option value="crosses_above">Crosses Above</option>
+                                    <option value="crosses_below">Crosses Below</option>
+                                    <option value="greater">Greater Than</option>
+                                    <option value="less">Less Than</option>
+                                    <option value="equals">Equals</option>
+                                </select>
+                                <select class="indicator-select">
+                                    <option value="ema" selected>EMA</option>
+                                    <option value="sma">SMA</option>
+                                    <option value="value">Value</option>
+                                </select>
+                                <input type="number" class="period-input" value="21" placeholder="Period/Value">
+                                <button class="condition-delete" onclick="deleteCondition(this)">🗑</button>
+                            </div>
+                            
+                            <div class="condition-logic">
+                                <button class="logic-btn active">AND</button>
+                                <button class="logic-btn">OR</button>
+                            </div>
+                            
+                            <div class="condition-row">
+                                <select class="indicator-select">
+                                    <option value="rsi" selected>RSI</option>
+                                    <option value="ema">EMA</option>
+                                    <option value="macd">MACD</option>
+                                    <option value="price">Price</option>
+                                </select>
+                                <input type="number" class="period-input" value="14" placeholder="Period">
+                                <select class="operator-select">
+                                    <option value="greater">Greater Than</option>
+                                    <option value="less" selected>Less Than</option>
+                                    <option value="crosses_above">Crosses Above</option>
+                                    <option value="crosses_below">Crosses Below</option>
+                                </select>
+                                <select class="indicator-select">
+                                    <option value="value" selected>Value</option>
+                                    <option value="ema">EMA</option>
+                                </select>
+                                <input type="number" class="value-input" value="70" placeholder="Value">
+                                <button class="condition-delete" onclick="deleteCondition(this)">🗑</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SELL Conditions -->
+                    <div class="condition-builder">
+                        <div class="condition-builder-header">
+                            <h4 class="sell">📉 SELL Conditions</h4>
+                            <button class="add-condition-btn" onclick="addCondition('sell')">+ Add Condition</button>
+                        </div>
+                        
+                        <div id="sellConditions">
+                            <div class="condition-row">
+                                <select class="indicator-select">
+                                    <option value="ema">EMA</option>
+                                    <option value="sma">SMA</option>
+                                    <option value="rsi">RSI</option>
+                                    <option value="macd">MACD</option>
+                                    <option value="price">Price</option>
+                                </select>
+                                <input type="number" class="period-input" value="9" placeholder="Period">
+                                <select class="operator-select">
+                                    <option value="crosses_below" selected>Crosses Below</option>
+                                    <option value="crosses_above">Crosses Above</option>
+                                    <option value="greater">Greater Than</option>
+                                    <option value="less">Less Than</option>
+                                </select>
+                                <select class="indicator-select">
+                                    <option value="ema" selected>EMA</option>
+                                    <option value="sma">SMA</option>
+                                    <option value="value">Value</option>
+                                </select>
+                                <input type="number" class="period-input" value="21" placeholder="Period/Value">
+                                <button class="condition-delete" onclick="deleteCondition(this)">🗑</button>
+                            </div>
+                            
+                            <div class="condition-logic">
+                                <button class="logic-btn active">AND</button>
+                                <button class="logic-btn">OR</button>
+                            </div>
+                            
+                            <div class="condition-row">
+                                <select class="indicator-select">
+                                    <option value="rsi" selected>RSI</option>
+                                    <option value="ema">EMA</option>
+                                    <option value="macd">MACD</option>
+                                </select>
+                                <input type="number" class="period-input" value="14" placeholder="Period">
+                                <select class="operator-select">
+                                    <option value="greater" selected>Greater Than</option>
+                                    <option value="less">Less Than</option>
+                                    <option value="crosses_above">Crosses Above</option>
+                                    <option value="crosses_below">Crosses Below</option>
+                                </select>
+                                <select class="indicator-select">
+                                    <option value="value" selected>Value</option>
+                                    <option value="ema">EMA</option>
+                                </select>
+                                <input type="number" class="value-input" value="30" placeholder="Value">
+                                <button class="condition-delete" onclick="deleteCondition(this)">🗑</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Risk Management Tab -->
+                <div class="config-tab-content hidden" id="tab-risk">
+                    <div class="config-section">
+                        <div class="config-section-title">Position Sizing</div>
+                        <div class="config-grid">
+                            <div class="config-field">
+                                <label>Max Capital Per Trade</label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="10000" id="maxCapital">
+                                    <span class="input-suffix">₹</span>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label>Max % of Portfolio</label>
+                                <div class="risk-slider">
+                                    <div class="slider-container">
+                                        <input type="range" min="1" max="50" value="10" id="portfolioPercent" oninput="updateSliderValue(this)">
+                                        <span class="slider-value">10%</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label>Max Open Positions</label>
+                                <input type="number" class="config-input" value="3" min="1" max="20" id="maxPositions">
+                            </div>
+                            <div class="config-field">
+                                <label>Position Size Method</label>
+                                <select class="config-select" id="sizingMethod">
+                                    <option value="fixed">Fixed Amount</option>
+                                    <option value="percent" selected>% of Portfolio</option>
+                                    <option value="risk">Risk-Based (ATR)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="config-section">
+                        <div class="config-section-title">Stop Loss & Target</div>
+                        <div class="config-grid">
+                            <div class="config-field">
+                                <label>Stop Loss Type</label>
+                                <select class="config-select" id="slType">
+                                    <option value="percent" selected>Percentage</option>
+                                    <option value="atr">ATR Based</option>
+                                    <option value="swing">Swing Low/High</option>
+                                    <option value="fixed">Fixed Points</option>
+                                </select>
+                            </div>
+                            <div class="config-field">
+                                <label>Stop Loss Value</label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="2" step="0.5" id="slValue">
+                                    <span class="input-suffix">%</span>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label>Target Type</label>
+                                <select class="config-select" id="targetType">
+                                    <option value="percent" selected>Percentage</option>
+                                    <option value="rr">Risk:Reward Ratio</option>
+                                    <option value="atr">ATR Based</option>
+                                    <option value="resistance">Next Resistance</option>
+                                </select>
+                            </div>
+                            <div class="config-field">
+                                <label>Target Value</label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="5" step="0.5" id="targetValue">
+                                    <span class="input-suffix">%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="config-section">
+                        <div class="config-section-title">Trailing Stop Loss</div>
+                        <div class="config-grid">
+                            <div class="config-field">
+                                <label>
+                                    <input type="checkbox" id="useTrailingSL" checked> Enable Trailing SL
+                                </label>
+                            </div>
+                            <div class="config-field">
+                                <label>Activation Profit</label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="2" step="0.5" id="trailActivation">
+                                    <span class="input-suffix">%</span>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label>Trail Distance</label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="1" step="0.25" id="trailDistance">
+                                    <span class="input-suffix">%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="config-section">
+                        <div class="config-section-title">Daily Limits</div>
+                        <div class="config-grid">
+                            <div class="config-field">
+                                <label>Max Daily Loss</label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="5000" id="maxDailyLoss">
+                                    <span class="input-suffix">₹</span>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label>Max Trades Per Day</label>
+                                <input type="number" class="config-input" value="5" min="1" max="50" id="maxDailyTrades">
+                            </div>
+                            <div class="config-field">
+                                <label>
+                                    <input type="checkbox" id="pauseOnLoss" checked> Pause on Max Loss
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Backtest Tab -->
+                <div class="config-tab-content hidden" id="tab-backtest">
+                    <div class="config-section">
+                        <div class="config-section-title">Backtest Settings</div>
+                        <div class="config-grid">
+                            <div class="config-field">
+                                <label>Start Date</label>
+                                <input type="date" class="config-input" value="2024-01-01" id="btStartDate">
+                            </div>
+                            <div class="config-field">
+                                <label>End Date</label>
+                                <input type="date" class="config-input" value="2024-12-31" id="btEndDate">
+                            </div>
+                            <div class="config-field">
+                                <label>Initial Capital</label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="100000" id="btCapital">
+                                    <span class="input-suffix">₹</span>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label>Commission</label>
+                                <div class="config-input-group">
+                                    <input type="number" class="config-input" value="0.03" step="0.01" id="btCommission">
+                                    <span class="input-suffix">%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px;">
+                        <button class="btn btn-primary" onclick="runBacktest()" style="padding: 14px 40px;">
+                            ▶️ Run Backtest
+                        </button>
+                    </div>
+
+                    <div class="config-section" id="backtestResults" style="display: none;">
+                        <div class="config-section-title">Backtest Results</div>
+                        <div class="config-grid" style="grid-template-columns: repeat(4, 1fr);">
+                            <div class="config-field" style="background: var(--bg-secondary); padding: 16px; border-radius: 10px; text-align: center;">
+                                <label>Total Return</label>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-green);">+24.5%</div>
+                            </div>
+                            <div class="config-field" style="background: var(--bg-secondary); padding: 16px; border-radius: 10px; text-align: center;">
+                                <label>Win Rate</label>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-blue);">68%</div>
+                            </div>
+                            <div class="config-field" style="background: var(--bg-secondary); padding: 16px; border-radius: 10px; text-align: center;">
+                                <label>Max Drawdown</label>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-red);">-8.2%</div>
+                            </div>
+                            <div class="config-field" style="background: var(--bg-secondary); padding: 16px; border-radius: 10px; text-align: center;">
+                                <label>Sharpe Ratio</label>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent-purple);">1.85</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="config-footer">
+                <div class="config-footer-left">
+                    <button class="btn btn-outline" onclick="resetToDefault()">↺ Reset to Default</button>
+                    <button class="btn btn-outline" onclick="importConfig()">📥 Import</button>
+                    <button class="btn btn-outline" onclick="exportConfig()">📤 Export</button>
+                </div>
+                <div class="config-footer-right">
+                    <button class="btn btn-secondary" onclick="closeStrategyConfig()">Cancel</button>
+                    <button class="btn btn-success" onclick="saveStrategyConfig()">✓ Save Configuration</button>
+                </div>
+            </div>
+        </div>
+    </div>
+        <div class="prod-confirm-content">
+            <div class="prod-warning-icon">⚠️</div>
+            <h2>Enable LIVE Trading?</h2>
+            <p>You are about to enable <strong id="prodStrategyName">RSI Divergence</strong> strategy for <strong>REAL MONEY</strong> trading. This action will execute actual trades on your Zerodha account.</p>
+            
+            <div class="prod-checklist">
+                <div class="prod-checklist-item pass">✅ Win rate > 60% (Current: 68%)</div>
+                <div class="prod-checklist-item pass">✅ Minimum 20 paper trades (Current: 31)</div>
+                <div class="prod-checklist-item pass">✅ Positive P&L in paper mode</div>
+                <div class="prod-checklist-item pass">✅ Risk parameters configured</div>
+            </div>
+
+            <input type="text" class="prod-confirm-input" id="prodConfirmInput" placeholder="Type 'GO LIVE' to confirm" onkeyup="checkProdConfirm()">
+
+            <div class="prod-confirm-actions">
+                <button class="btn btn-secondary" onclick="closeProdConfirm()">Cancel</button>
+                <button class="btn btn-danger" id="prodConfirmBtn" disabled onclick="confirmProdMode()">
+                    🚀 Enable Live Trading
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">ST</div>
+                    <span class="logo-text">SwingTrade Pro</span>
+                </div>
+                <button class="toggle-btn" onclick="toggleSidebar()">☰</button>
+            </div>
+
+            <div class="mode-badge">
+                <div class="mode-dot"></div>
+                <span>Paper Trading Mode</span>
+            </div>
+
+            <div class="sidebar-section">
+                <span class="section-label">Select Stock</span>
+                <div class="stock-dropdown">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" placeholder="Search stocks..." id="stockSearch" onkeyup="filterStocks()">
+                </div>
+                <div class="stock-list" id="stockList">
+                    <div class="stock-item selected" onclick="selectStock('RELIANCE')">
+                        <span class="stock-symbol">RELIANCE</span>
+                        <span class="stock-change positive">+2.4%</span>
+                    </div>
+                    <div class="stock-item" onclick="selectStock('TCS')">
+                        <span class="stock-symbol">TCS</span>
+                        <span class="stock-change positive">+1.2%</span>
+                    </div>
+                    <div class="stock-item" onclick="selectStock('INFY')">
+                        <span class="stock-symbol">INFY</span>
+                        <span class="stock-change negative">-0.8%</span>
+                    </div>
+                    <div class="stock-item" onclick="selectStock('HDFCBANK')">
+                        <span class="stock-symbol">HDFCBANK</span>
+                        <span class="stock-change positive">+0.5%</span>
+                    </div>
+                    <div class="stock-item" onclick="selectStock('ICICIBANK')">
+                        <span class="stock-symbol">ICICIBANK</span>
+                        <span class="stock-change negative">-1.1%</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <span class="section-label">Display Strategies</span>
+                <div class="strategy-filter">
+                    <label class="strategy-checkbox">
+                        <input type="checkbox" checked>
+                        <span class="checkmark"></span>
+                        <span>EMA Crossover</span>
+                    </label>
+                    <label class="strategy-checkbox">
+                        <input type="checkbox" checked>
+                        <span class="checkmark"></span>
+                        <span>RSI Divergence</span>
+                    </label>
+                    <label class="strategy-checkbox">
+                        <input type="checkbox" checked>
+                        <span class="checkmark"></span>
+                        <span>MACD + Supertrend</span>
+                    </label>
+                    <label class="strategy-checkbox">
+                        <input type="checkbox">
+                        <span class="checkmark"></span>
+                        <span>Bollinger Bands</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="shortcut-hint">
+                <strong>Shortcuts:</strong><br>
+                <kbd>/</kbd> Search &nbsp; <kbd>B</kbd> Buy &nbsp; <kbd>X</kbd> Sell<br>
+                <kbd>1-3</kbd> Toggle Strategy &nbsp; <kbd>Esc</kbd> Close
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Production Summary Bar -->
+            <div class="prod-summary" id="prodSummary">
+                <div class="prod-summary-left">
+                    <div class="prod-live-indicator"></div>
+                    <div>
+                        <h3>🔴 LIVE TRADING ACTIVE</h3>
+                        <span class="prod-strategies-count"><span id="prodStratCount">1</span> strategy in production</span>
+                    </div>
+                </div>
+                <div class="prod-summary-right">
+                    <div class="prod-capital">
+                        <div class="prod-capital-label">Deployed Capital</div>
+                        <div class="prod-capital-value">₹50,000</div>
+                    </div>
+                    <div class="prod-capital">
+                        <div class="prod-capital-label">Today's P&L</div>
+                        <div class="prod-capital-value positive">+₹1,250</div>
+                    </div>
+                    <button class="kill-switch" onclick="killSwitch()">
+                        🛑 KILL SWITCH
+                    </button>
+                </div>
+            </div>
+
+            <div class="main-header">
+                <div class="selected-stock-info">
+                    <h1 id="selectedStockSymbol">RELIANCE</h1>
+                    <span class="stock-price">₹2,847.50</span>
+                    <span class="stock-price-change positive">+2.4% (+66.75)</span>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" onclick="openScreener()">
+                        🔄 Re-run Screener
+                    </button>
+                    <button class="btn btn-icon btn-secondary">⚙️</button>
+                </div>
+            </div>
+
+            <div class="strategy-grid">
+                <!-- Strategy Card 1: EMA Crossover -->
+                <div class="strategy-card">
+                    <div class="strategy-header">
+                        <div class="strategy-name">
+                            <div class="strategy-icon ema">📈</div>
+                            <h3>EMA Crossover (9/21)</h3>
+                        </div>
+                        <div class="auto-trade-toggle">
+                            <span>Auto Trade</span>
+                            <div class="toggle-switch" onclick="toggleAutoTrade(this)"></div>
+                        </div>
+                        <button class="strategy-config-btn" onclick="openStrategyConfig('ema')" title="Configure Strategy">
+                            ⚙️
+                        </button>
+                    </div>
+                    <div class="strategy-mode-bar">
+                        <div class="mode-selector">
+                            <button class="mode-btn paper active" onclick="setStrategyMode(this, 'paper')" data-strategy="ema">
+                                <span class="mode-icon">📝</span> Paper
+                            </button>
+                            <button class="mode-btn prod" onclick="setStrategyMode(this, 'prod')" data-strategy="ema">
+                                <span class="mode-icon">🚀</span> Prod
+                            </button>
+                        </div>
+                        <div class="strategy-stats">
+                            <span class="stat win-rate" title="Win Rate">🎯 72%</span>
+                            <span class="stat trades" title="Total Trades">📊 24</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Strategy Conditions Summary -->
+                    <div class="strategy-conditions-bar">
+                        <div class="condition-tag buy">
+                            <span class="condition-label">BUY:</span>
+                            <span class="condition-value">EMA9 crosses above EMA21</span>
+                        </div>
+                        <div class="condition-tag sell">
+                            <span class="condition-label">SELL:</span>
+                            <span class="condition-value">EMA9 crosses below EMA21</span>
+                        </div>
+                    </div>
+                    
+                    <div class="chart-container">
+                        <div class="chart-placeholder">
+                            <div class="chart-area"></div>
+                            <div class="chart-line"></div>
+                            <div class="chart-signal buy">B</div>
+                            <div class="chart-signal sell">S</div>
+                        </div>
+                    </div>
+                    <div class="strategy-actions">
+                        <button class="action-btn buy">BUY (B)</button>
+                        <button class="action-btn sell">SELL (X)</button>
+                    </div>
+                    <div class="pnl-section">
+                        <div class="pnl-header">
+                            <h4>Recent Trades</h4>
+                            <span class="pnl-summary positive">+₹4,250</span>
+                        </div>
+                        <table class="pnl-table">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Price</th>
+                                    <th>Qty</th>
+                                    <th>P&L</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="trade-type buy">BUY</span></td>
+                                    <td>₹2,780</td>
+                                    <td>10</td>
+                                    <td class="positive">+₹675</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="trade-type sell">SELL</span></td>
+                                    <td>₹2,815</td>
+                                    <td>10</td>
+                                    <td class="positive">+₹350</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Strategy Card 2: RSI Divergence -->
+                <div class="strategy-card" data-mode="prod">
+                    <div class="strategy-header">
+                        <div class="strategy-name">
+                            <div class="strategy-icon rsi">📊</div>
+                            <h3>RSI Divergence</h3>
+                        </div>
+                        <div class="auto-trade-toggle">
+                            <span>Auto Trade</span>
+                            <div class="toggle-switch active" onclick="toggleAutoTrade(this)"></div>
+                        </div>
+                        <button class="strategy-config-btn" onclick="openStrategyConfig('rsi')" title="Configure Strategy">
+                            ⚙️
+                        </button>
+                    </div>
+                    <div class="strategy-mode-bar prod-active">
+                        <div class="mode-selector">
+                            <button class="mode-btn paper" onclick="setStrategyMode(this, 'paper')" data-strategy="rsi">
+                                <span class="mode-icon">📝</span> Paper
+                            </button>
+                            <button class="mode-btn prod active" onclick="setStrategyMode(this, 'prod')" data-strategy="rsi">
+                                <span class="mode-icon">🚀</span> Prod
+                            </button>
+                        </div>
+                        <div class="strategy-stats">
+                            <span class="stat win-rate" title="Win Rate">🎯 68%</span>
+                            <span class="stat trades" title="Total Trades">📊 31</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Strategy Conditions Summary -->
+                    <div class="strategy-conditions-bar">
+                        <div class="condition-tag buy">
+                            <span class="condition-label">BUY:</span>
+                            <span class="condition-value">RSI(14) < 30 + Bullish divergence</span>
+                        </div>
+                        <div class="condition-tag sell">
+                            <span class="condition-label">SELL:</span>
+                            <span class="condition-value">RSI(14) > 70 + Bearish divergence</span>
+                        </div>
+                    </div>
+                    
+                    <div class="chart-container">
+                        <div class="chart-placeholder">
+                            <div class="chart-area" style="background: linear-gradient(180deg, rgba(139, 92, 246, 0.15) 0%, transparent 100%);"></div>
+                            <div class="chart-line" style="background: var(--accent-purple); filter: drop-shadow(0 0 8px var(--accent-purple));"></div>
+                            <div class="chart-signal buy" style="left: 40%; bottom: 60%;">B</div>
+                        </div>
+                    </div>
+                    <div class="strategy-actions">
+                        <button class="action-btn buy">BUY (B)</button>
+                        <button class="action-btn sell">SELL (X)</button>
+                    </div>
+                    <div class="pnl-section">
+                        <div class="pnl-header">
+                            <h4>Recent Trades</h4>
+                            <span class="pnl-summary positive">+₹2,180</span>
+                        </div>
+                        <table class="pnl-table">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Price</th>
+                                    <th>Qty</th>
+                                    <th>P&L</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="trade-type buy">BUY</span></td>
+                                    <td>₹2,795</td>
+                                    <td>5</td>
+                                    <td class="positive">+₹262</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="trade-type buy">BUY</span></td>
+                                    <td>₹2,760</td>
+                                    <td>8</td>
+                                    <td class="positive">+₹700</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Strategy Card 3: MACD + Supertrend -->
+                <div class="strategy-card">
+                    <div class="strategy-header">
+                        <div class="strategy-name">
+                            <div class="strategy-icon macd">🎯</div>
+                            <h3>MACD + Supertrend</h3>
+                        </div>
+                        <div class="auto-trade-toggle">
+                            <span>Auto Trade</span>
+                            <div class="toggle-switch" onclick="toggleAutoTrade(this)"></div>
+                        </div>
+                        <button class="strategy-config-btn" onclick="openStrategyConfig('macd')" title="Configure Strategy">
+                            ⚙️
+                        </button>
+                    </div>
+                    <div class="strategy-mode-bar">
+                        <div class="mode-selector">
+                            <button class="mode-btn paper active" onclick="setStrategyMode(this, 'paper')" data-strategy="macd">
+                                <span class="mode-icon">📝</span> Paper
+                            </button>
+                            <button class="mode-btn prod" onclick="setStrategyMode(this, 'prod')" data-strategy="macd">
+                                <span class="mode-icon">🚀</span> Prod
+                            </button>
+                        </div>
+                        <div class="strategy-stats">
+                            <span class="stat win-rate low" title="Win Rate">🎯 42%</span>
+                            <span class="stat trades" title="Total Trades">📊 12</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Strategy Conditions Summary -->
+                    <div class="strategy-conditions-bar">
+                        <div class="condition-tag buy">
+                            <span class="condition-label">BUY:</span>
+                            <span class="condition-value">MACD crossover + Supertrend green</span>
+                        </div>
+                        <div class="condition-tag sell">
+                            <span class="condition-label">SELL:</span>
+                            <span class="condition-value">MACD crossunder + Supertrend red</span>
+                        </div>
+                    </div>
+                    
+                    <div class="chart-container">
+                        <div class="chart-placeholder">
+                            <div class="chart-area" style="background: linear-gradient(180deg, rgba(16, 185, 129, 0.15) 0%, transparent 100%);"></div>
+                            <div class="chart-line" style="background: var(--accent-green); filter: drop-shadow(0 0 8px var(--accent-green));"></div>
+                            <div class="chart-signal sell" style="left: 55%; bottom: 45%;">S</div>
+                        </div>
+                    </div>
+                    <div class="strategy-actions">
+                        <button class="action-btn buy">BUY (B)</button>
+                        <button class="action-btn sell">SELL (X)</button>
+                    </div>
+                    <div class="pnl-section">
+                        <div class="pnl-header">
+                            <h4>Recent Trades</h4>
+                            <span class="pnl-summary negative">-₹850</span>
+                        </div>
+                        <table class="pnl-table">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Price</th>
+                                    <th>Qty</th>
+                                    <th>P&L</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="trade-type sell">SELL</span></td>
+                                    <td>₹2,820</td>
+                                    <td>5</td>
+                                    <td class="negative">-₹137</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="trade-type buy">BUY</span></td>
+                                    <td>₹2,850</td>
+                                    <td>3</td>
+                                    <td class="negative">-₹75</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Keyboard Indicator -->
+    <div class="keyboard-indicator">
+        Press <kbd>?</kbd> for all shortcuts
+    </div>
+
+    <script>
+        // Screener Modal
+        function openScreener() {
+            document.getElementById('screenerModal').classList.remove('hidden');
+        }
+
+        function runScreener() {
+            document.getElementById('screenerModal').classList.add('hidden');
+            // Simulate loading stocks from screener
+            console.log('Running screener:', document.getElementById('screenerQuery').value);
+        }
+
+        function skipScreener() {
+            document.getElementById('screenerModal').classList.add('hidden');
+        }
+
+        function setPreset(type) {
+            const presets = {
+                'oversold': '( {cash} ( latest rsi(14) < 30 and latest close > latest ema(close, 200) ) )',
+                'breakout': '( {cash} ( latest close = latest max(close, 20) and latest volume > 2 * latest sma(volume, 20) ) )',
+                'ema': '( {cash} ( latest ema(close, 9) > latest ema(close, 21) and 1 day ago ema(close, 9) < 1 day ago ema(close, 21) ) )',
+                'supertrend': '( {cash} ( latest supertrend(10,3) = "up" and 1 day ago supertrend(10,3) = "down" ) )'
+            };
+            document.getElementById('screenerQuery').value = presets[type];
+        }
+
+        // Sidebar Toggle
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('collapsed');
+        }
+
+        // Stock Selection
+        function selectStock(symbol) {
+            document.querySelectorAll('.stock-item').forEach(item => item.classList.remove('selected'));
+            event.target.closest('.stock-item').classList.add('selected');
+            document.getElementById('selectedStockSymbol').textContent = symbol;
+        }
+
+        function filterStocks() {
+            const query = document.getElementById('stockSearch').value.toLowerCase();
+            document.querySelectorAll('.stock-item').forEach(item => {
+                const symbol = item.querySelector('.stock-symbol').textContent.toLowerCase();
+                item.style.display = symbol.includes(query) ? 'flex' : 'none';
+            });
+        }
+
+        // Auto Trade Toggle
+        function toggleAutoTrade(element) {
+            element.classList.toggle('active');
+        }
+
+        // Keyboard Shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '/') {
+                e.preventDefault();
+                document.getElementById('stockSearch').focus();
+            }
+            if (e.key === 'Escape') {
+                document.getElementById('screenerModal').classList.add('hidden');
+                document.getElementById('prodConfirmModal').classList.add('hidden');
+            }
+            if (e.key === 'b' || e.key === 'B') {
+                console.log('Buy triggered');
+            }
+            if (e.key === 'x' || e.key === 'X') {
+                console.log('Sell triggered');
+            }
+        });
+
+        // Production Mode Functions
+        let currentStrategy = null;
+        let prodStrategies = ['rsi']; // Track which strategies are in prod
+
+        function setStrategyMode(btn, mode) {
+            const strategy = btn.dataset.strategy;
+            
+            if (mode === 'prod') {
+                // Show confirmation modal
+                currentStrategy = strategy;
+                document.getElementById('prodStrategyName').textContent = getStrategyName(strategy);
+                document.getElementById('prodConfirmModal').classList.remove('hidden');
+                document.getElementById('prodConfirmInput').value = '';
+                document.getElementById('prodConfirmBtn').disabled = true;
+            } else {
+                // Switch to paper mode
+                switchToPaper(strategy);
+            }
+        }
+
+        function getStrategyName(code) {
+            const names = {
+                'ema': 'EMA Crossover',
+                'rsi': 'RSI Divergence',
+                'macd': 'MACD + Supertrend'
+            };
+            return names[code] || code;
+        }
+
+        function checkProdConfirm() {
+            const input = document.getElementById('prodConfirmInput').value;
+            document.getElementById('prodConfirmBtn').disabled = input !== 'GO LIVE';
+        }
+
+        function closeProdConfirm() {
+            document.getElementById('prodConfirmModal').classList.add('hidden');
+            currentStrategy = null;
+        }
+
+        function confirmProdMode() {
+            if (!currentStrategy) return;
+            
+            // Update button states
+            const modeBar = document.querySelector(`[data-strategy="${currentStrategy}"]`).closest('.strategy-mode-bar');
+            const card = modeBar.closest('.strategy-card');
+            
+            modeBar.classList.add('prod-active');
+            modeBar.querySelector('.mode-btn.paper').classList.remove('active');
+            modeBar.querySelector('.mode-btn.prod').classList.add('active');
+            card.dataset.mode = 'prod';
+            
+            // Add to prod strategies
+            if (!prodStrategies.includes(currentStrategy)) {
+                prodStrategies.push(currentStrategy);
+            }
+            
+            updateProdSummary();
+            closeProdConfirm();
+            
+            // Show notification
+            showNotification(`🚀 ${getStrategyName(currentStrategy)} is now LIVE!`, 'success');
+        }
+
+        function switchToPaper(strategy) {
+            const modeBar = document.querySelector(`[data-strategy="${strategy}"]`).closest('.strategy-mode-bar');
+            const card = modeBar.closest('.strategy-card');
+            
+            modeBar.classList.remove('prod-active');
+            modeBar.querySelector('.mode-btn.prod').classList.remove('active');
+            modeBar.querySelector('.mode-btn.paper').classList.add('active');
+            card.dataset.mode = 'paper';
+            
+            // Remove from prod strategies
+            prodStrategies = prodStrategies.filter(s => s !== strategy);
+            
+            updateProdSummary();
+            showNotification(`📝 ${getStrategyName(strategy)} switched to Paper mode`, 'info');
+        }
+
+        function updateProdSummary() {
+            const summary = document.getElementById('prodSummary');
+            const count = document.getElementById('prodStratCount');
+            
+            if (prodStrategies.length > 0) {
+                summary.classList.remove('hidden');
+                count.textContent = prodStrategies.length;
+            } else {
+                summary.classList.add('hidden');
+            }
+        }
+
+        function killSwitch() {
+            if (confirm('⚠️ KILL SWITCH: This will immediately disable ALL live trading strategies. Continue?')) {
+                prodStrategies.forEach(strategy => switchToPaper(strategy));
+                showNotification('🛑 All strategies switched to Paper mode!', 'warning');
+            }
+        }
+
+        function showNotification(message, type) {
+            const notif = document.createElement('div');
+            notif.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 16px 24px;
+                background: var(--bg-card);
+                border: 1px solid ${type === 'success' ? 'var(--accent-green)' : type === 'warning' ? 'var(--accent-red)' : 'var(--accent-blue)'};
+                border-radius: 10px;
+                color: var(--text-primary);
+                font-size: 0.95rem;
+                z-index: 3000;
+                animation: slideIn 0.3s ease;
+            `;
+            notif.textContent = message;
+            document.body.appendChild(notif);
+            
+            setTimeout(() => notif.remove(), 3000);
+        }
+
+        // Initialize
+        updateProdSummary();
+
+        // Strategy Configuration Functions
+        const strategyConfigs = {
+            ema: {
+                name: 'EMA Crossover',
+                icon: '📈',
+                indicators: { fastEMA: 9, slowEMA: 21, timeframe: '1d' }
+            },
+            rsi: {
+                name: 'RSI Divergence',
+                icon: '📊',
+                indicators: { rsiPeriod: 14, oversold: 30, overbought: 70 }
+            },
+            macd: {
+                name: 'MACD + Supertrend',
+                icon: '🎯',
+                indicators: { macdFast: 12, macdSlow: 26, signal: 9, supertrendPeriod: 10, supertrendMult: 3 }
+            }
+        };
+
+        let currentConfigStrategy = null;
+
+        function openStrategyConfig(strategy) {
+            currentConfigStrategy = strategy;
+            const config = strategyConfigs[strategy];
+            
+            document.getElementById('configStrategyName').textContent = config.name;
+            document.getElementById('configStrategyIcon').textContent = config.icon;
+            document.getElementById('strategyConfigModal').classList.remove('hidden');
+            
+            // Reset to first tab
+            switchConfigTab(document.querySelector('.config-tab'), 'indicators');
+        }
+
+        function closeStrategyConfig() {
+            document.getElementById('strategyConfigModal').classList.add('hidden');
+            currentConfigStrategy = null;
+        }
+
+        function switchConfigTab(btn, tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.config-tab').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            
+            // Show corresponding content
+            document.querySelectorAll('.config-tab-content').forEach(c => c.classList.add('hidden'));
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+        }
+
+        function addCondition(type) {
+            const container = document.getElementById(`${type}Conditions`);
+            
+            const logicDiv = document.createElement('div');
+            logicDiv.className = 'condition-logic';
+            logicDiv.innerHTML = `
+                <button class="logic-btn active" onclick="toggleLogic(this)">AND</button>
+                <button class="logic-btn" onclick="toggleLogic(this)">OR</button>
+            `;
+            
+            const conditionRow = document.createElement('div');
+            conditionRow.className = 'condition-row';
+            conditionRow.innerHTML = `
+                <select class="indicator-select">
+                    <option value="ema">EMA</option>
+                    <option value="sma">SMA</option>
+                    <option value="rsi">RSI</option>
+                    <option value="macd">MACD</option>
+                    <option value="price">Price</option>
+                    <option value="volume">Volume</option>
+                    <option value="supertrend">Supertrend</option>
+                </select>
+                <input type="number" class="period-input" value="14" placeholder="Period">
+                <select class="operator-select">
+                    <option value="crosses_above">Crosses Above</option>
+                    <option value="crosses_below">Crosses Below</option>
+                    <option value="greater">Greater Than</option>
+                    <option value="less">Less Than</option>
+                </select>
+                <select class="indicator-select">
+                    <option value="value">Value</option>
+                    <option value="ema">EMA</option>
+                    <option value="sma">SMA</option>
+                </select>
+                <input type="number" class="value-input" value="50" placeholder="Value">
+                <button class="condition-delete" onclick="deleteCondition(this)">🗑</button>
+            `;
+            
+            container.appendChild(logicDiv);
+            container.appendChild(conditionRow);
+        }
+
+        function deleteCondition(btn) {
+            const row = btn.closest('.condition-row');
+            const prevLogic = row.previousElementSibling;
+            if (prevLogic && prevLogic.classList.contains('condition-logic')) {
+                prevLogic.remove();
+            }
+            row.remove();
+        }
+
+        function toggleLogic(btn) {
+            const parent = btn.parentElement;
+            parent.querySelectorAll('.logic-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+
+        function updateSliderValue(slider) {
+            slider.nextElementSibling.textContent = slider.value + '%';
+        }
+
+        function runBacktest() {
+            // Simulate backtest
+            const btn = event.target;
+            btn.textContent = '⏳ Running...';
+            btn.disabled = true;
+            
+            setTimeout(() => {
+                document.getElementById('backtestResults').style.display = 'block';
+                btn.textContent = '▶️ Run Backtest';
+                btn.disabled = false;
+                showNotification('✅ Backtest completed!', 'success');
+            }, 2000);
+        }
+
+        function saveStrategyConfig() {
+            // Gather all config values
+            const config = {
+                strategy: currentConfigStrategy,
+                indicators: {
+                    fastEMA: document.getElementById('emaFast')?.value,
+                    slowEMA: document.getElementById('emaSlow')?.value,
+                    timeframe: document.getElementById('timeframe')?.value,
+                    rsiPeriod: document.getElementById('rsiPeriod')?.value,
+                    useVolume: document.getElementById('useVolume')?.checked,
+                },
+                risk: {
+                    maxCapital: document.getElementById('maxCapital')?.value,
+                    slValue: document.getElementById('slValue')?.value,
+                    targetValue: document.getElementById('targetValue')?.value,
+                    maxDailyLoss: document.getElementById('maxDailyLoss')?.value,
+                }
+            };
+            
+            console.log('Saving config:', config);
+            showNotification(`✅ ${strategyConfigs[currentConfigStrategy].name} configuration saved!`, 'success');
+            closeStrategyConfig();
+        }
+
+        function resetToDefault() {
+            if (confirm('Reset all settings to default values?')) {
+                showNotification('↺ Settings reset to default', 'info');
+            }
+        }
+
+        function exportConfig() {
+            const config = { strategy: currentConfigStrategy, /* ... gather config ... */ };
+            const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${currentConfigStrategy}_config.json`;
+            a.click();
+            showNotification('📤 Configuration exported!', 'success');
+        }
+
+        function importConfig() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const config = JSON.parse(event.target.result);
+                    console.log('Imported config:', config);
+                    showNotification('📥 Configuration imported!', 'success');
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
+
+        // Keyboard shortcut for config modal
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeStrategyConfig();
+            }
+        });
+    </script>
+</body>
+</html>

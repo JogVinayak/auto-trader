@@ -1,0 +1,194 @@
+.signals-table-container {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-top: 24px;
+}
+
+.signals-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.signals-table-header h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.signals-count {
+  font-size: 14px;
+  color: var(--text-secondary);
+  padding: 4px 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+}
+
+.signals-table {
+  overflow-x: auto;
+}
+
+.signals-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.signals-table thead tr {
+  border-bottom: 2px solid var(--border);
+}
+
+.signals-table th {
+  padding: 12px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.signals-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.2s;
+}
+
+.signals-table tbody tr:hover {
+  background: var(--bg-secondary);
+}
+
+.signals-table td {
+  padding: 16px 12px;
+  font-size: 14px;
+}
+
+.strategy-cell .strategy-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.signal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 12px;
+  border: 1px solid;
+}
+
+.signal-badge.buy {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--accent-green);
+  border-color: var(--accent-green);
+}
+
+.signal-badge.sell {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--accent-red);
+  border-color: var(--accent-red);
+}
+
+.signal-badge.hold {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--accent-orange);
+  border-color: var(--accent-orange);
+}
+
+.signal-icon {
+  flex-shrink: 0;
+}
+
+.strength-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.strength-bar-small {
+  flex: 1;
+  max-width: 80px;
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.strength-fill-small {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.strength-fill-small.buy {
+  background: var(--accent-green);
+}
+
+.strength-fill-small.sell {
+  background: var(--accent-red);
+}
+
+.strength-fill-small.hold {
+  background: var(--accent-orange);
+}
+
+.strength-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 40px;
+}
+
+.reason-cell {
+  color: var(--text-secondary);
+  font-size: 13px;
+  max-width: 300px;
+}
+
+.indicators-cell {
+  min-width: 200px;
+}
+
+.mini-indicators {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mini-indicator {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.mini-indicator-label {
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+
+.mini-indicator-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.signals-table-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 1200px) {
+  .signals-table {
+    overflow-x: scroll;
+  }
+
+  .signals-table table {
+    min-width: 900px;
+  }
+}
