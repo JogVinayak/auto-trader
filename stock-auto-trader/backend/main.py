@@ -6,7 +6,7 @@ from datetime import datetime
 import os
 
 from database import get_db, engine
-from models import Base, Stock, Candle, Trade, Portfolio, Holding, TimeFrame, TradeType, StrategyType
+from models import Base, Stock, Candle, Trade, Portfolio, Holding, StrategySettings, TimeFrame, TradeType, StrategyType
 
 # Create tables on startup
 Base.metadata.create_all(bind=engine)
@@ -268,6 +268,51 @@ def get_trades(
 
 
 # ============ SIGNALS ============
+def _get_strategy_with_settings(strategy_name: str, db: Session):
+    """Create strategy instance with settings from database"""
+    from strategies import STRATEGIES
+
+    strategy_class = STRATEGIES.get(strategy_name.upper())
+    if not strategy_class:
+        raise ValueError(f"Unknown strategy: {strategy_name}")
+
+    # Get settings from database
+    try:
+        strategy_type = StrategyType(strategy_name.upper())
+        setting = db.query(StrategySettings).filter(StrategySettings.strategy == strategy_type).first()
+    except ValueError:
+        setting = None
+
+    # Create strategy with custom settings if available
+    if setting:
+        if strategy_name.upper() == "MACD":
+            return strategy_class(
+                fast_period=setting.macd_fast_period,
+                slow_period=setting.macd_slow_period,
+                signal_period=setting.macd_signal_period
+            )
+        elif strategy_name.upper() == "RSI":
+            return strategy_class(
+                period=setting.rsi_period,
+                overbought=setting.rsi_overbought,
+                oversold=setting.rsi_oversold
+            )
+        elif strategy_name.upper() == "MA_CROSSOVER":
+            return strategy_class(
+                short_period=setting.ma_short_period,
+                long_period=setting.ma_long_period,
+                ma_type=setting.ma_type
+            )
+        elif strategy_name.upper() == "BOLLINGER":
+            return strategy_class(
+                period=setting.bollinger_period,
+                std_dev=setting.bollinger_std_dev
+            )
+
+    # Return with default settings
+    return strategy_class()
+
+
 @app.get("/signals/{symbol}", tags=["Signals"])
 def get_signals(
     symbol: str,
@@ -279,29 +324,29 @@ def get_signals(
     Get trading signals for a stock
     - strategy: MACD, RSI, MA_CROSSOVER, BOLLINGER (if not provided, returns all)
     """
-    from strategies import get_strategy, get_all_strategies, STRATEGIES
+    from strategies import STRATEGIES
     import pandas as pd
-    
+
     # Get candles
     stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
     if not stock:
         raise HTTPException(status_code=404, detail=f"Stock {symbol} not found. Sync it first.")
-    
+
     tf_map = {"1m": TimeFrame.M1, "5m": TimeFrame.M5, "1h": TimeFrame.H1, "1d": TimeFrame.D1}
     tf = tf_map.get(timeframe)
     if not tf:
         raise HTTPException(status_code=400, detail="Invalid timeframe. Use: 1m, 5m, 1h, 1d")
-    
+
     candles = (
         db.query(Candle)
         .filter(Candle.stock_id == stock.id, Candle.timeframe == tf)
         .order_by(Candle.timestamp.asc())
         .all()
     )
-    
+
     if len(candles) < 50:
         raise HTTPException(status_code=400, detail=f"Insufficient candles ({len(candles)}). Need at least 50.")
-    
+
     # Convert to DataFrame
     df = pd.DataFrame([{
         "timestamp": c.timestamp,
@@ -311,14 +356,14 @@ def get_signals(
         "close": c.close,
         "volume": c.volume
     } for c in candles])
-    
+
     current_price = df['close'].iloc[-1]
-    
+
     # Calculate signals
     if strategy:
-        # Single strategy
+        # Single strategy with DB settings
         try:
-            strat = get_strategy(strategy)
+            strat = _get_strategy_with_settings(strategy, db)
             result = strat.calculate(df)
             return {
                 "symbol": symbol.upper(),
@@ -329,24 +374,24 @@ def get_signals(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     else:
-        # All strategies
+        # All strategies with DB settings
         signals = []
-        for name, strat_class in STRATEGIES.items():
-            strat = strat_class()
+        for name in STRATEGIES.keys():
+            strat = _get_strategy_with_settings(name, db)
             result = strat.calculate(df)
             signals.append(result)
-        
+
         # Calculate overall recommendation
         buy_count = sum(1 for s in signals if s["signal"] == "BUY")
         sell_count = sum(1 for s in signals if s["signal"] == "SELL")
-        
+
         if buy_count > sell_count:
             overall = "BUY"
         elif sell_count > buy_count:
             overall = "SELL"
         else:
             overall = "HOLD"
-        
+
         return {
             "symbol": symbol.upper(),
             "timeframe": timeframe,
@@ -362,7 +407,7 @@ def get_signals(
 def list_strategies():
     """List all available trading strategies"""
     from strategies import STRATEGIES
-    
+
     return {
         "strategies": [
             {
@@ -372,6 +417,127 @@ def list_strategies():
             for name, strat_class in STRATEGIES.items()
         ]
     }
+
+
+# ============ STRATEGY SETTINGS ============
+@app.get("/strategy-settings", tags=["Strategy Settings"])
+def get_all_strategy_settings(db: Session = Depends(get_db)):
+    """Get settings for all strategies"""
+    settings = {}
+    for strategy_type in StrategyType:
+        setting = db.query(StrategySettings).filter(StrategySettings.strategy == strategy_type).first()
+        if setting:
+            settings[strategy_type.value] = _format_strategy_settings(setting, strategy_type)
+        else:
+            settings[strategy_type.value] = _get_default_settings(strategy_type)
+    return settings
+
+
+@app.get("/strategy-settings/{strategy}", tags=["Strategy Settings"])
+def get_strategy_settings(strategy: str, db: Session = Depends(get_db)):
+    """Get settings for a specific strategy"""
+    try:
+        strategy_type = StrategyType(strategy.upper())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid strategy: {strategy}")
+
+    setting = db.query(StrategySettings).filter(StrategySettings.strategy == strategy_type).first()
+
+    if setting:
+        return _format_strategy_settings(setting, strategy_type)
+    else:
+        return _get_default_settings(strategy_type)
+
+
+@app.post("/strategy-settings/{strategy}", tags=["Strategy Settings"])
+def save_strategy_settings(strategy: str, settings: dict, db: Session = Depends(get_db)):
+    """Save settings for a specific strategy"""
+    try:
+        strategy_type = StrategyType(strategy.upper())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid strategy: {strategy}")
+
+    # Get or create settings record
+    setting = db.query(StrategySettings).filter(StrategySettings.strategy == strategy_type).first()
+    if not setting:
+        setting = StrategySettings(strategy=strategy_type)
+        db.add(setting)
+
+    # Update settings based on strategy type
+    if strategy_type == StrategyType.MACD:
+        if "fast_period" in settings:
+            setting.macd_fast_period = settings["fast_period"]
+        if "slow_period" in settings:
+            setting.macd_slow_period = settings["slow_period"]
+        if "signal_period" in settings:
+            setting.macd_signal_period = settings["signal_period"]
+
+    elif strategy_type == StrategyType.RSI:
+        if "period" in settings:
+            setting.rsi_period = settings["period"]
+        if "overbought" in settings:
+            setting.rsi_overbought = settings["overbought"]
+        if "oversold" in settings:
+            setting.rsi_oversold = settings["oversold"]
+
+    elif strategy_type == StrategyType.MA_CROSSOVER:
+        if "short_period" in settings:
+            setting.ma_short_period = settings["short_period"]
+        if "long_period" in settings:
+            setting.ma_long_period = settings["long_period"]
+        if "ma_type" in settings:
+            setting.ma_type = settings["ma_type"]
+
+    elif strategy_type == StrategyType.BOLLINGER:
+        if "period" in settings:
+            setting.bollinger_period = settings["period"]
+        if "std_dev" in settings:
+            setting.bollinger_std_dev = settings["std_dev"]
+
+    setting.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(setting)
+
+    return {"message": f"{strategy} settings saved", "settings": _format_strategy_settings(setting, strategy_type)}
+
+
+def _format_strategy_settings(setting: StrategySettings, strategy_type: StrategyType) -> dict:
+    """Format strategy settings for API response"""
+    if strategy_type == StrategyType.MACD:
+        return {
+            "fast_period": setting.macd_fast_period,
+            "slow_period": setting.macd_slow_period,
+            "signal_period": setting.macd_signal_period,
+        }
+    elif strategy_type == StrategyType.RSI:
+        return {
+            "period": setting.rsi_period,
+            "overbought": setting.rsi_overbought,
+            "oversold": setting.rsi_oversold,
+        }
+    elif strategy_type == StrategyType.MA_CROSSOVER:
+        return {
+            "short_period": setting.ma_short_period,
+            "long_period": setting.ma_long_period,
+            "ma_type": setting.ma_type,
+        }
+    elif strategy_type == StrategyType.BOLLINGER:
+        return {
+            "period": setting.bollinger_period,
+            "std_dev": setting.bollinger_std_dev,
+        }
+    return {}
+
+
+def _get_default_settings(strategy_type: StrategyType) -> dict:
+    """Get default settings for a strategy"""
+    defaults = {
+        StrategyType.MACD: {"fast_period": 12, "slow_period": 26, "signal_period": 9},
+        StrategyType.RSI: {"period": 14, "overbought": 70, "oversold": 30},
+        StrategyType.MA_CROSSOVER: {"short_period": 20, "long_period": 50, "ma_type": "EMA"},
+        StrategyType.BOLLINGER: {"period": 20, "std_dev": 2.0},
+    }
+    return defaults.get(strategy_type, {})
 
 
 # ============ STARTUP ============

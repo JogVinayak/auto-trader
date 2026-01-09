@@ -24,6 +24,35 @@ const TradingChartWithIndicators = ({
   useEffect(() => {
     if (!priceChartContainerRef.current || !data || data.length === 0) return;
 
+    // Helper to convert timestamp to unix seconds
+    const toUnixTime = (timestamp) => {
+      if (!timestamp) return 0;
+      return Math.floor(new Date(timestamp).getTime() / 1000);
+    };
+
+    // Build a map of candle timestamps for proper alignment
+    const candleTimeMap = new Map();
+    data.forEach((candle) => {
+      const time = toUnixTime(candle.timestamp);
+      candleTimeMap.set(time, candle);
+    });
+
+    // Helper to align indicator data with candle timestamps
+    const alignIndicatorData = (indicatorValues, timestamps) => {
+      if (!indicatorValues || !timestamps || indicatorValues.length === 0) return [];
+
+      const aligned = [];
+      for (let i = 0; i < indicatorValues.length; i++) {
+        const time = toUnixTime(timestamps[i]);
+        const value = indicatorValues[i];
+        if (time > 0 && value !== null && value !== undefined && !isNaN(value)) {
+          aligned.push({ time, value });
+        }
+      }
+      // Sort by time to ensure proper ordering
+      return aligned.sort((a, b) => a.time - b.time);
+    };
+
     const chartOptions = {
       layout: {
         background: { color: '#1a2234' },
@@ -35,18 +64,30 @@ const TradingChartWithIndicators = ({
       },
       crosshair: {
         mode: 1,
+        vertLine: {
+          labelVisible: true,
+        },
+        horzLine: {
+          labelVisible: true,
+        },
       },
       rightPriceScale: {
         borderColor: '#2d3748',
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.1,
+        },
       },
       timeScale: {
         borderColor: '#2d3748',
         timeVisible: true,
         secondsVisible: false,
+        rightOffset: 5,
+        barSpacing: 6,
+        minBarSpacing: 2,
         tickMarkFormatter: (time) => {
           const date = new Date(time * 1000);
-          const istDate = new Date(date.getTime() + (5.5 * 60 * 60 * 1000));
-          return istDate.toLocaleString('en-IN', {
+          return date.toLocaleString('en-IN', {
             month: 'short',
             day: 'numeric',
             hour: '2-digit',
@@ -150,10 +191,10 @@ const TradingChartWithIndicators = ({
 
     // Add overlay indicators (MA, Bollinger Bands)
     if (indicators && strategyName) {
+      const timestamps = indicators.timestamps || [];
+
       // MA Crossover - overlay on price
       if (strategyName === 'MA_CROSSOVER' && indicators.short_ma_line && indicators.long_ma_line) {
-        const timestamps = indicators.timestamps || [];
-
         const shortMaSeries = priceChart.addLineSeries({
           color: '#3b82f6',
           lineWidth: 2,
@@ -166,15 +207,8 @@ const TradingChartWithIndicators = ({
           title: 'Long MA',
         });
 
-        const shortData = indicators.short_ma_line.map((value, idx) => ({
-          time: timestamps[idx] ? new Date(timestamps[idx]).getTime() / 1000 : formattedData[idx]?.time || 0,
-          value: value,
-        })).filter(d => d.time > 0 && d.value !== null && !isNaN(d.value));
-
-        const longData = indicators.long_ma_line.map((value, idx) => ({
-          time: timestamps[idx] ? new Date(timestamps[idx]).getTime() / 1000 : formattedData[idx]?.time || 0,
-          value: value,
-        })).filter(d => d.time > 0 && d.value !== null && !isNaN(d.value));
+        const shortData = alignIndicatorData(indicators.short_ma_line, timestamps);
+        const longData = alignIndicatorData(indicators.long_ma_line, timestamps);
 
         if (shortData.length > 0) shortMaSeries.setData(shortData);
         if (longData.length > 0) longMaSeries.setData(longData);
@@ -182,8 +216,6 @@ const TradingChartWithIndicators = ({
 
       // Bollinger Bands - overlay on price
       if (strategyName === 'BOLLINGER' && indicators.upper_band_line && indicators.lower_band_line && indicators.middle_band_line) {
-        const timestamps = indicators.timestamps || [];
-
         const upperBandSeries = priceChart.addLineSeries({
           color: '#ef4444',
           lineWidth: 1,
@@ -204,20 +236,9 @@ const TradingChartWithIndicators = ({
           title: 'Lower Band',
         });
 
-        const upperData = indicators.upper_band_line.map((value, idx) => ({
-          time: timestamps[idx] ? new Date(timestamps[idx]).getTime() / 1000 : formattedData[idx]?.time || 0,
-          value: value,
-        })).filter(d => d.time > 0 && d.value !== null && !isNaN(d.value));
-
-        const middleData = indicators.middle_band_line.map((value, idx) => ({
-          time: timestamps[idx] ? new Date(timestamps[idx]).getTime() / 1000 : formattedData[idx]?.time || 0,
-          value: value,
-        })).filter(d => d.time > 0 && d.value !== null && !isNaN(d.value));
-
-        const lowerData = indicators.lower_band_line.map((value, idx) => ({
-          time: timestamps[idx] ? new Date(timestamps[idx]).getTime() / 1000 : formattedData[idx]?.time || 0,
-          value: value,
-        })).filter(d => d.time > 0 && d.value !== null && !isNaN(d.value));
+        const upperData = alignIndicatorData(indicators.upper_band_line, timestamps);
+        const middleData = alignIndicatorData(indicators.middle_band_line, timestamps);
+        const lowerData = alignIndicatorData(indicators.lower_band_line, timestamps);
 
         if (upperData.length > 0) upperBandSeries.setData(upperData);
         if (middleData.length > 0) middleBandSeries.setData(middleData);
@@ -225,35 +246,68 @@ const TradingChartWithIndicators = ({
       }
     }
 
-    // Create indicator panel for MACD/RSI
+    // Create indicator panel for MACD/RSI (TradingView style - separate synced panel)
     let indicatorChart = null;
     if (needsIndicatorPanel && indicatorChartContainerRef.current && indicators) {
+      const timestamps = indicators.timestamps || [];
+
+      // Create a map of indicator timestamps to values for proper alignment
+      const indicatorTimeMap = new Map();
+      timestamps.forEach((ts, idx) => {
+        indicatorTimeMap.set(toUnixTime(ts), idx);
+      });
+
+      // Helper to create indicator data aligned with ALL candle timestamps
+      // This ensures both charts have the same number of data points for proper sync
+      const createAlignedIndicatorData = (indicatorValues) => {
+        if (!indicatorValues || indicatorValues.length === 0) return [];
+
+        return formattedData.map(candle => {
+          const idx = indicatorTimeMap.get(candle.time);
+          if (idx !== undefined && indicatorValues[idx] !== null && !isNaN(indicatorValues[idx])) {
+            return { time: candle.time, value: indicatorValues[idx] };
+          }
+          // Return data point with same time but no value (creates gap in chart)
+          return { time: candle.time, value: undefined };
+        }).filter(d => d.value !== undefined);
+      };
+
+      // Create indicator chart with matching time scale settings
       indicatorChart = createChart(indicatorChartContainerRef.current, {
         ...chartOptions,
         width: indicatorChartContainerRef.current.clientWidth,
         height: indicatorChartHeight,
+        timeScale: {
+          ...chartOptions.timeScale,
+          visible: false, // Hide time axis on indicator panel (TradingView style)
+        },
+        rightPriceScale: {
+          borderColor: '#2d3748',
+          scaleMargins: {
+            top: 0.1,
+            bottom: 0.1,
+          },
+        },
       });
 
       indicatorChartRef.current = indicatorChart;
 
-      const timestamps = indicators.timestamps || [];
-
       // MACD Indicator
       if (strategyName === 'MACD' && indicators.macd_line && indicators.signal_line && indicators.histogram_line) {
-        // MACD histogram
+        // MACD histogram - use aligned data for proper sync with candles
         const histogramSeries = indicatorChart.addHistogramSeries({
           priceFormat: {
             type: 'price',
             precision: 4,
             minMove: 0.0001,
           },
+          priceScaleId: 'right',
         });
 
-        const histogramData = indicators.histogram_line.map((value, idx) => ({
-          time: timestamps[idx] ? new Date(timestamps[idx]).getTime() / 1000 : formattedData[idx]?.time || 0,
-          value: value,
-          color: value >= 0 ? '#26a69a' : '#ef5350',
-        })).filter(d => d.time > 0 && d.value !== null && !isNaN(d.value));
+        const histogramData = createAlignedIndicatorData(indicators.histogram_line).map(d => ({
+          ...d,
+          color: d.value >= 0 ? '#26a69a' : '#ef5350',
+        }));
 
         if (histogramData.length > 0) {
           histogramSeries.setData(histogramData);
@@ -264,13 +318,10 @@ const TradingChartWithIndicators = ({
           color: '#2196F3',
           lineWidth: 2,
           title: 'MACD',
+          priceScaleId: 'right',
         });
 
-        const macdData = indicators.macd_line.map((value, idx) => ({
-          time: timestamps[idx] ? new Date(timestamps[idx]).getTime() / 1000 : formattedData[idx]?.time || 0,
-          value: value,
-        })).filter(d => d.time > 0 && d.value !== null && !isNaN(d.value));
-
+        const macdData = createAlignedIndicatorData(indicators.macd_line);
         if (macdData.length > 0) {
           macdLineSeries.setData(macdData);
         }
@@ -280,96 +331,149 @@ const TradingChartWithIndicators = ({
           color: '#FF6D00',
           lineWidth: 2,
           title: 'Signal',
+          priceScaleId: 'right',
         });
 
-        const signalData = indicators.signal_line.map((value, idx) => ({
-          time: timestamps[idx] ? new Date(timestamps[idx]).getTime() / 1000 : formattedData[idx]?.time || 0,
-          value: value,
-        })).filter(d => d.time > 0 && d.value !== null && !isNaN(d.value));
-
+        const signalData = createAlignedIndicatorData(indicators.signal_line);
         if (signalData.length > 0) {
           signalLineSeries.setData(signalData);
         }
+
+        // Zero line spanning all candles for reference
+        const zeroLine = indicatorChart.addLineSeries({
+          color: '#4a5568',
+          lineWidth: 1,
+          lineStyle: 2,
+          priceScaleId: 'right',
+          crosshairMarkerVisible: false,
+        });
+        const zeroData = formattedData.map(d => ({ time: d.time, value: 0 }));
+        zeroLine.setData(zeroData);
       }
 
       // RSI Indicator
       if (strategyName === 'RSI' && indicators.rsi_line) {
+        // Configure RSI scale (0-100)
+        indicatorChart.applyOptions({
+          rightPriceScale: {
+            autoScale: false,
+            scaleMargins: {
+              top: 0.05,
+              bottom: 0.05,
+            },
+          },
+        });
+
         const rsiSeries = indicatorChart.addLineSeries({
           color: '#9C27B0',
           lineWidth: 2,
           title: 'RSI',
+          priceScaleId: 'right',
         });
+
+        // Use aligned data for proper sync with candles
+        const rsiData = createAlignedIndicatorData(indicators.rsi_line);
+
+        if (rsiData.length > 0) {
+          rsiSeries.setData(rsiData);
+        }
+
+        // Reference lines spanning all candles
+        const allTimes = formattedData.map(d => d.time);
+        const overboughtData = allTimes.map(time => ({ time, value: 70 }));
+        const oversoldData = allTimes.map(time => ({ time, value: 30 }));
+        const middleData = allTimes.map(time => ({ time, value: 50 }));
 
         // Overbought line (70)
         const overboughtLine = indicatorChart.addLineSeries({
           color: '#ef4444',
           lineWidth: 1,
           lineStyle: 2,
-          title: 'Overbought',
+          priceScaleId: 'right',
+          crosshairMarkerVisible: false,
         });
+        overboughtLine.setData(overboughtData);
+
+        // Middle line (50)
+        const middleLine = indicatorChart.addLineSeries({
+          color: '#4a5568',
+          lineWidth: 1,
+          lineStyle: 2,
+          priceScaleId: 'right',
+          crosshairMarkerVisible: false,
+        });
+        middleLine.setData(middleData);
 
         // Oversold line (30)
         const oversoldLine = indicatorChart.addLineSeries({
           color: '#10b981',
           lineWidth: 1,
           lineStyle: 2,
-          title: 'Oversold',
+          priceScaleId: 'right',
+          crosshairMarkerVisible: false,
         });
-
-        const rsiData = indicators.rsi_line.map((value, idx) => ({
-          time: timestamps[idx] ? new Date(timestamps[idx]).getTime() / 1000 : formattedData[idx]?.time || 0,
-          value: value,
-        })).filter(d => d.time > 0 && d.value !== null && !isNaN(d.value));
-
-        if (rsiData.length > 0) {
-          rsiSeries.setData(rsiData);
-
-          const overboughtData = rsiData.map(d => ({ time: d.time, value: 70 }));
-          const oversoldData = rsiData.map(d => ({ time: d.time, value: 30 }));
-
-          overboughtLine.setData(overboughtData);
-          oversoldLine.setData(oversoldData);
-        }
+        oversoldLine.setData(oversoldData);
       }
 
-      // Sync time scales with better handling to prevent lag
-      let isProgrammaticChange = false;
+      // TradingView-style synchronized scrolling and zooming
+      let isSyncing = false;
 
-      priceChart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {
-        if (!isProgrammaticChange && timeRange) {
-          isProgrammaticChange = true;
-          indicatorChart.timeScale().setVisibleRange(timeRange);
-          isProgrammaticChange = false;
+      const syncTimeScale = (sourceChart, targetChart) => {
+        if (isSyncing) return;
+        isSyncing = true;
+
+        const sourceTimeScale = sourceChart.timeScale();
+        const targetTimeScale = targetChart.timeScale();
+
+        const logicalRange = sourceTimeScale.getVisibleLogicalRange();
+        if (logicalRange) {
+          targetTimeScale.setVisibleLogicalRange(logicalRange);
         }
+
+        isSyncing = false;
+      };
+
+      // Sync on visible range change (zoom/scroll)
+      priceChart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        syncTimeScale(priceChart, indicatorChart);
       });
 
-      indicatorChart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {
-        if (!isProgrammaticChange && timeRange) {
-          isProgrammaticChange = true;
-          priceChart.timeScale().setVisibleRange(timeRange);
-          isProgrammaticChange = false;
-        }
+      indicatorChart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        syncTimeScale(indicatorChart, priceChart);
       });
 
-      // Also sync crosshair movement for better UX
+      // Sync crosshair movement
       priceChart.subscribeCrosshairMove((param) => {
-        if (param.time) {
-          indicatorChart.setCrosshairPosition(param.point?.x || 0, param.time, indicatorChart.series()[0]);
+        if (param.time && indicatorChart.series().length > 0) {
+          indicatorChart.setCrosshairPosition(0, param.time, indicatorChart.series()[0]);
+        } else {
+          indicatorChart.clearCrosshairPosition();
         }
       });
 
       indicatorChart.subscribeCrosshairMove((param) => {
-        if (param.time) {
-          const candlestickSeries = priceChart.series()[0];
-          priceChart.setCrosshairPosition(param.point?.x || 0, param.time, candlestickSeries);
+        if (param.time && priceChart.series().length > 0) {
+          priceChart.setCrosshairPosition(0, param.time, priceChart.series()[0]);
+        } else {
+          priceChart.clearCrosshairPosition();
         }
       });
     }
 
-    // Auto-fit content
-    priceChart.timeScale().fitContent();
+    // Set initial view to show latest candles (TradingView style)
+    // Show approximately the last 50-80 candles to match indicator data coverage
+    const totalBars = formattedData.length;
+    const visibleBars = Math.min(80, totalBars); // Show last 80 candles or all if less
+    const initialLogicalRange = {
+      from: totalBars - visibleBars,
+      to: totalBars + 5, // Add some padding on the right
+    };
+
+    priceChart.timeScale().setVisibleLogicalRange(initialLogicalRange);
+
     if (indicatorChart) {
-      indicatorChart.timeScale().fitContent();
+      // Sync indicator chart to the same logical range
+      indicatorChart.timeScale().setVisibleLogicalRange(initialLogicalRange);
     }
 
     // Handle window resize

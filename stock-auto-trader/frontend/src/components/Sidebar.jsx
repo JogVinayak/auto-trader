@@ -3,7 +3,7 @@ import { Search, TrendingUp, Settings } from 'lucide-react';
 import StrategySettingsModal from './StrategySettingsModal';
 import './Sidebar.css';
 
-const Sidebar = ({ stocks, selectedStock, onSelectStock, strategies, selectedStrategies, onToggleStrategy }) => {
+const Sidebar = ({ stocks, selectedStock, onSelectStock, strategies, selectedStrategies, onToggleStrategy, onSettingsSaved }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -20,9 +20,11 @@ const Sidebar = ({ stocks, selectedStock, onSelectStock, strategies, selectedStr
   };
 
   const handleSaveSettings = (strategyName, settings) => {
-    console.log(`Saving settings for ${strategyName}:`, settings);
-    // TODO: Save settings to backend/local storage
-    // You can add an API call here to save strategy settings
+    console.log(`Settings saved for ${strategyName}:`, settings);
+    // Notify parent to refresh signals with new settings
+    if (onSettingsSaved) {
+      onSettingsSaved(strategyName);
+    }
   };
 
   return (

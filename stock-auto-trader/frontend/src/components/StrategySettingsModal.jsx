@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
-import { X, Settings, Info } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { X, Settings, Info, Loader2 } from 'lucide-react';
+import { strategySettingsAPI } from '../services/api';
 import './StrategySettingsModal.css';
 
 const StrategySettingsModal = ({ isOpen, onClose, strategy, onSave }) => {
   const [settings, setSettings] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Default settings for each strategy
+  // Default settings for each strategy (UI configuration)
   const strategyDefaults = {
     MACD: {
       fast_period: { value: 12, label: 'Fast Period', min: 5, max: 30, description: 'Fast EMA period' },
@@ -34,17 +39,32 @@ const StrategySettingsModal = ({ isOpen, onClose, strategy, onSave }) => {
     },
   };
 
+  // Fetch settings from database when modal opens
   useEffect(() => {
     if (isOpen && strategy) {
-      // Initialize settings with default values
+      fetchSettings();
+    }
+  }, [isOpen, strategy]);
+
+  const fetchSettings = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await strategySettingsAPI.get(strategy.name);
+      setSettings(response.data);
+    } catch (err) {
+      console.error('Error fetching settings:', err);
+      // Fall back to defaults
       const defaults = strategyDefaults[strategy.name] || {};
       const initialSettings = {};
       Object.keys(defaults).forEach(key => {
         initialSettings[key] = defaults[key].value;
       });
       setSettings(initialSettings);
+    } finally {
+      setLoading(false);
     }
-  }, [isOpen, strategy]);
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -75,12 +95,23 @@ const StrategySettingsModal = ({ isOpen, onClose, strategy, onSave }) => {
     }));
   };
 
-  const handleSave = () => {
-    onSave(strategy.name, settings);
-    onClose();
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await strategySettingsAPI.save(strategy.name, settings);
+      // Call the parent onSave to refresh signals
+      onSave(strategy.name, settings);
+      onClose();
+    } catch (err) {
+      console.error('Error saving settings:', err);
+      setError('Failed to save settings. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     const defaults = strategyDefaults[strategy.name] || {};
     const resetSettings = {};
     Object.keys(defaults).forEach(key => {
@@ -95,7 +126,8 @@ const StrategySettingsModal = ({ isOpen, onClose, strategy, onSave }) => {
     }
   };
 
-  return (
+  // Use portal to render modal at document body level (above all other elements)
+  return createPortal(
     <div className="strategy-settings-overlay" onClick={handleOverlayClick}>
       <div className="strategy-settings-modal">
         <div className="strategy-settings-header">
@@ -114,59 +146,80 @@ const StrategySettingsModal = ({ isOpen, onClose, strategy, onSave }) => {
             <p>{strategy.description}</p>
           </div>
 
-          <div className="settings-form">
-            {Object.entries(strategyConfig).map(([key, config]) => (
-              <div key={key} className="setting-item">
-                <div className="setting-label-row">
-                  <label htmlFor={key}>{config.label}</label>
-                  <span className="setting-value-display">{settings[key]}</span>
+          {loading ? (
+            <div className="settings-loading">
+              <Loader2 size={24} className="spin" />
+              <span>Loading settings...</span>
+            </div>
+          ) : (
+            <div className="settings-form">
+              {Object.entries(strategyConfig).map(([key, config]) => (
+                <div key={key} className="setting-item">
+                  <div className="setting-label-row">
+                    <label htmlFor={key}>{config.label}</label>
+                    <span className="setting-value-display">{settings[key]}</span>
+                  </div>
+
+                  {config.type === 'select' ? (
+                    <select
+                      id={key}
+                      value={settings[key] || config.value}
+                      onChange={(e) => handleChange(key, e.target.value)}
+                      className="setting-select"
+                    >
+                      {config.options.map(option => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="range"
+                      id={key}
+                      min={config.min}
+                      max={config.max}
+                      step={config.step || 1}
+                      value={settings[key] || config.value}
+                      onChange={(e) => handleChange(key, Number(e.target.value))}
+                      className="setting-slider"
+                    />
+                  )}
+
+                  <span className="setting-description">{config.description}</span>
                 </div>
+              ))}
+            </div>
+          )}
 
-                {config.type === 'select' ? (
-                  <select
-                    id={key}
-                    value={settings[key] || config.value}
-                    onChange={(e) => handleChange(key, e.target.value)}
-                    className="setting-select"
-                  >
-                    {config.options.map(option => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="range"
-                    id={key}
-                    min={config.min}
-                    max={config.max}
-                    step={config.step || 1}
-                    value={settings[key] || config.value}
-                    onChange={(e) => handleChange(key, Number(e.target.value))}
-                    className="setting-slider"
-                  />
-                )}
-
-                <span className="setting-description">{config.description}</span>
-              </div>
-            ))}
-          </div>
+          {error && (
+            <div className="settings-error">
+              {error}
+            </div>
+          )}
         </div>
 
         <div className="strategy-settings-footer">
-          <button className="btn btn-secondary" onClick={handleReset}>
+          <button className="btn btn-secondary" onClick={handleReset} disabled={loading || saving}>
             Reset to Defaults
           </button>
           <div className="footer-actions">
-            <button className="btn btn-secondary" onClick={onClose}>
+            <button className="btn btn-secondary" onClick={onClose} disabled={saving}>
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={handleSave}>
-              Save Settings
+            <button className="btn btn-primary" onClick={handleSave} disabled={loading || saving}>
+              {saving ? (
+                <>
+                  <Loader2 size={16} className="spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Settings'
+              )}
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
