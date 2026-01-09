@@ -233,6 +233,187 @@
   z-index: 10001;
 }
 
+/* Timeframe Controls */
+.chart-modal-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeframe-dropdown {
+  position: relative;
+}
+
+.timeframe-dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 120px;
+  justify-content: space-between;
+}
+
+.timeframe-dropdown-btn:hover:not(:disabled) {
+  background: var(--bg-card);
+  border-color: var(--accent-blue);
+}
+
+.timeframe-dropdown-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.timeframe-dropdown-btn svg {
+  transition: transform 0.2s ease;
+}
+
+.timeframe-dropdown-btn svg.rotated {
+  transform: rotate(180deg);
+}
+
+.timeframe-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  min-width: 140px;
+  overflow: hidden;
+  animation: dropdownFadeIn 0.15s ease-out;
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.timeframe-option {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.timeframe-option:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.timeframe-option.active {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+
+.chart-sync-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.chart-sync-btn:hover:not(:disabled) {
+  background: var(--bg-card);
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.chart-sync-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Loading and empty states */
+.chart-loading,
+.chart-no-data {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 16px;
+  color: var(--text-secondary);
+}
+
+.chart-loading span {
+  font-size: 16px;
+}
+
+.chart-no-data p {
+  font-size: 16px;
+  margin: 0;
+}
+
+.chart-no-data .btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--accent-blue);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.chart-no-data .btn:hover:not(:disabled) {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+
+.chart-no-data .btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Spinning animation */
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 768px) {
   .chart-modal-content {
     width: 100vw;
@@ -265,5 +446,20 @@
 
   .indicators-list-modal {
     flex-direction: column;
+  }
+
+  .chart-modal-controls {
+    order: 2;
+  }
+
+  .timeframe-dropdown-btn {
+    min-width: 100px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+
+  .chart-sync-btn {
+    width: 32px;
+    height: 32px;
   }
 }

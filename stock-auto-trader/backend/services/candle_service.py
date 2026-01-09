@@ -101,17 +101,34 @@ def fetch_candles_from_yahoo_api(
         # Skip if any OHLC value is None
         if any(quote[k][i] is None for k in ["open", "high", "low", "close"]):
             continue
-            
+
+        # Normalize timestamp to remove microseconds for consistent comparison
+        candle_ts = datetime.fromtimestamp(ts).replace(microsecond=0)
+
         candles.append({
-            "timestamp": datetime.fromtimestamp(ts),
+            "timestamp": candle_ts,
             "open": float(quote["open"][i]),
             "high": float(quote["high"][i]),
             "low": float(quote["low"][i]),
             "close": float(quote["close"][i]),
             "volume": int(quote["volume"][i]) if quote["volume"][i] else 0
         })
-    
+
     return candles
+
+
+def get_existing_timestamps(db: Session, stock_id: int, timeframe: TimeFrame) -> set:
+    """Get all existing timestamps for a stock/timeframe combination"""
+    results = (
+        db.query(Candle.timestamp)
+        .filter(Candle.stock_id == stock_id, Candle.timeframe == timeframe)
+        .all()
+    )
+    # For daily candles, use date only; for others, truncate to minute
+    if timeframe == TimeFrame.D1:
+        return {r[0].date() if r[0] else None for r in results}
+    else:
+        return {r[0].replace(second=0, microsecond=0) if r[0] else None for r in results}
 
 
 def sync_candles(
@@ -122,13 +139,14 @@ def sync_candles(
 ) -> Dict:
     """
     Sync candles from Yahoo Finance API to database
+    Checks for existing candles before inserting to prevent duplicates
     Returns: dict with sync stats
     """
     symbol = symbol.upper().strip()
-    
+
     # Get or create stock
     stock = get_or_create_stock(db, symbol)
-    
+
     # Determine start timestamp for sync
     start_timestamp = None
     if not full_sync:
@@ -136,7 +154,7 @@ def sync_candles(
         if latest_timestamp:
             # Start from latest + 1 second to avoid duplicates
             start_timestamp = int(latest_timestamp.timestamp()) + 1
-    
+
     # Fetch from Yahoo Finance API
     try:
         candles_data = fetch_candles_from_yahoo_api(symbol, timeframe, start_timestamp)
@@ -147,7 +165,7 @@ def sync_candles(
             "symbol": symbol,
             "timeframe": timeframe.value
         }
-    
+
     if not candles_data:
         return {
             "success": True,
@@ -156,50 +174,58 @@ def sync_candles(
             "new_candles": 0,
             "message": "No new candles available"
         }
-    
-    # Process and insert candles
-    new_count = 0
-    skipped_count = 0
-    
+
+    # Get all existing timestamps for this stock/timeframe to check duplicates
+    existing_timestamps = get_existing_timestamps(db, stock.id, timeframe)
+
+    # Filter out candles that already exist
+    new_candles = []
     for candle_data in candles_data:
-        timestamp = candle_data["timestamp"]
-        
-        # Check if candle already exists
-        existing = (
-            db.query(Candle)
-            .filter(
-                Candle.stock_id == stock.id,
-                Candle.timeframe == timeframe,
-                Candle.timestamp == timestamp
-            )
-            .first()
-        )
-        
-        if existing:
-            skipped_count += 1
-            continue
-        
-        # Create new candle
-        candle = Candle(
+        # For daily candles, compare by date only; for others, truncate to minute
+        if timeframe == TimeFrame.D1:
+            key = candle_data["timestamp"].date()
+        else:
+            key = candle_data["timestamp"].replace(second=0, microsecond=0)
+
+        if key not in existing_timestamps:
+            new_candles.append(candle_data)
+
+    skipped_count = len(candles_data) - len(new_candles)
+
+    if not new_candles:
+        return {
+            "success": True,
+            "symbol": symbol,
+            "timeframe": timeframe.value,
+            "new_candles": 0,
+            "skipped": skipped_count,
+            "total_fetched": len(candles_data),
+            "message": "All candles already exist in database"
+        }
+
+    # Bulk insert only new candles
+    candles_to_insert = [
+        Candle(
             stock_id=stock.id,
             timeframe=timeframe,
-            timestamp=timestamp,
+            timestamp=candle_data["timestamp"],
             open=candle_data["open"],
             high=candle_data["high"],
             low=candle_data["low"],
             close=candle_data["close"],
             volume=candle_data["volume"]
         )
-        db.add(candle)
-        new_count += 1
-    
+        for candle_data in new_candles
+    ]
+
+    db.bulk_save_objects(candles_to_insert)
     db.commit()
-    
+
     return {
         "success": True,
         "symbol": symbol,
         "timeframe": timeframe.value,
-        "new_candles": new_count,
+        "new_candles": len(new_candles),
         "skipped": skipped_count,
         "total_fetched": len(candles_data),
         "latest_timestamp": candles_data[-1]["timestamp"].isoformat() if candles_data else None
@@ -218,17 +244,17 @@ def sync_all_timeframes(db: Session, symbol: str, full_sync: bool = False) -> Li
 def get_sync_status(db: Session, symbol: str) -> Dict:
     """Get sync status for all timeframes of a symbol"""
     stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
-    
+
     if not stock:
         return {"symbol": symbol, "exists": False, "timeframes": {}}
-    
+
     status = {
         "symbol": symbol,
         "exists": True,
         "stock_name": stock.name,
         "timeframes": {}
     }
-    
+
     for tf in TimeFrame:
         count = (
             db.query(Candle)
@@ -236,10 +262,73 @@ def get_sync_status(db: Session, symbol: str) -> Dict:
             .count()
         )
         latest = get_latest_candle_timestamp(db, stock.id, tf)
-        
+
         status["timeframes"][tf.value] = {
             "candle_count": count,
             "latest_timestamp": latest.isoformat() if latest else None
         }
-    
+
     return status
+
+
+def remove_duplicate_candles(db: Session, symbol: str = None) -> Dict:
+    """
+    Remove duplicate candles from database.
+    For daily candles, considers same date as duplicate (ignores time).
+    For other timeframes, uses exact timestamp match.
+    Keeps the candle with the lowest ID for each unique combination.
+    """
+    from sqlalchemy import func, and_, cast, Date
+
+    total_removed = 0
+
+    # Get stocks to process
+    if symbol:
+        stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+        if not stock:
+            return {"success": False, "error": f"Stock {symbol} not found"}
+        stocks = [stock]
+    else:
+        stocks = db.query(Stock).all()
+
+    for stock in stocks:
+        for tf in TimeFrame:
+            # Get all candles for this stock/timeframe
+            candles = (
+                db.query(Candle)
+                .filter(Candle.stock_id == stock.id, Candle.timeframe == tf)
+                .order_by(Candle.id)
+                .all()
+            )
+
+            if not candles:
+                continue
+
+            # Track seen timestamps/dates and IDs to delete
+            seen = set()
+            ids_to_delete = []
+
+            for candle in candles:
+                # For daily candles, use date only; for others use full timestamp
+                if tf == TimeFrame.D1:
+                    key = candle.timestamp.date()
+                else:
+                    # Truncate to minute for intraday
+                    key = candle.timestamp.replace(second=0, microsecond=0)
+
+                if key in seen:
+                    ids_to_delete.append(candle.id)
+                else:
+                    seen.add(key)
+
+            if ids_to_delete:
+                db.query(Candle).filter(Candle.id.in_(ids_to_delete)).delete(synchronize_session=False)
+                total_removed += len(ids_to_delete)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "duplicates_removed": total_removed,
+        "message": f"Removed {total_removed} duplicate candles"
+    }

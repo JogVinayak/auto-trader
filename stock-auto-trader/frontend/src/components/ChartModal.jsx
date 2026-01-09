@@ -1,12 +1,29 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Maximize2 } from 'lucide-react';
+import { X, Maximize2, RefreshCw, ChevronDown } from 'lucide-react';
 import TradingChartWithIndicators from './TradingChartWithIndicators';
+import { candlesAPI, signalsAPI } from '../services/api';
 import './ChartModal.css';
 
-const ChartModal = ({ isOpen, onClose, strategy, signal, candles, symbol, trades = [] }) => {
+const TIMEFRAMES = [
+  { value: '1m', label: '1 Minute' },
+  { value: '5m', label: '5 Minutes' },
+  { value: '1h', label: '1 Hour' },
+  { value: '1d', label: '1 Day' },
+];
+
+const ChartModal = ({ isOpen, onClose, strategy, signal, candles: initialCandles, symbol, trades = [] }) => {
   const [chartHeight, setChartHeight] = useState(0);
   const chartBodyRef = useRef(null);
+
+  // Timeframe state
+  const [selectedTimeframe, setSelectedTimeframe] = useState('1d');
+  const [chartCandles, setChartCandles] = useState(initialCandles);
+  const [chartSignal, setChartSignal] = useState(signal);
+  const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
 
   // Calculate available height for chart
   const calculateChartHeight = useCallback(() => {
@@ -18,6 +35,108 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles, symbol, trades
       setChartHeight(Math.max(availableHeight, 300)); // Minimum 300px
     }
   }, []);
+
+  // Fetch candles for selected timeframe
+  const fetchCandlesForTimeframe = useCallback(async (timeframe) => {
+    if (!symbol) return;
+
+    try {
+      setLoading(true);
+      console.log(`📊 Fetching ${timeframe} candles for ${symbol}...`);
+
+      // Fetch candles for the timeframe
+      const candlesRes = await candlesAPI.get(symbol, timeframe, 200);
+
+      if (candlesRes.data && candlesRes.data.length > 0) {
+        console.log(`✅ Loaded ${candlesRes.data.length} candles for ${timeframe}`);
+        setChartCandles(candlesRes.data);
+
+        // Also fetch signals for this timeframe
+        try {
+          const signalsRes = await signalsAPI.get(symbol, timeframe, strategy);
+          const signals = signalsRes.data.signals || [];
+          const strategySignal = signals.find(s => s.strategy === strategy);
+          if (strategySignal) {
+            setChartSignal(strategySignal);
+          }
+        } catch (signalError) {
+          console.log('ℹ️ Could not fetch signals for timeframe:', signalError.message);
+        }
+      } else {
+        // No data available, show empty and offer to sync
+        console.log(`⚠️ No ${timeframe} data available for ${symbol}`);
+        setChartCandles([]);
+      }
+    } catch (error) {
+      console.error(`Error fetching ${timeframe} candles:`, error);
+      // If 400 error (insufficient data), show empty state
+      if (error.response?.status === 400) {
+        setChartCandles([]);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [symbol, strategy]);
+
+  // Sync candles for the selected timeframe
+  const handleSyncTimeframe = async () => {
+    if (!symbol || syncing) return;
+
+    try {
+      setSyncing(true);
+      console.log(`🔄 Syncing ${selectedTimeframe} data for ${symbol}...`);
+
+      await candlesAPI.sync(symbol, selectedTimeframe, false);
+
+      // Refetch after sync
+      await fetchCandlesForTimeframe(selectedTimeframe);
+
+      console.log(`✅ Sync complete for ${selectedTimeframe}`);
+    } catch (error) {
+      console.error('Error syncing candles:', error);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // Handle timeframe change
+  const handleTimeframeChange = (timeframe) => {
+    setSelectedTimeframe(timeframe);
+    setDropdownOpen(false);
+    if (timeframe !== '1d') {
+      fetchCandlesForTimeframe(timeframe);
+    } else {
+      // Reset to initial data for 1d
+      setChartCandles(initialCandles);
+      setChartSignal(signal);
+    }
+  };
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedTimeframe('1d');
+      setChartCandles(initialCandles);
+      setChartSignal(signal);
+    }
+  }, [isOpen, initialCandles, signal]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+      }
+    };
+
+    if (dropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [dropdownOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -63,11 +182,49 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles, symbol, trades
             <Maximize2 size={20} />
             <h2>{symbol} - {strategy.replace('_', ' ')}</h2>
           </div>
-          <div className="chart-modal-info">
-            <div className={`signal-badge-modal ${signal.signal.toLowerCase()}`}>
-              <span>{signal.signal}</span>
+
+          <div className="chart-modal-controls">
+            {/* Timeframe Dropdown */}
+            <div className="timeframe-dropdown" ref={dropdownRef}>
+              <button
+                className="timeframe-dropdown-btn"
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                disabled={loading || syncing}
+              >
+                <span>{TIMEFRAMES.find(tf => tf.value === selectedTimeframe)?.label || selectedTimeframe}</span>
+                <ChevronDown size={16} className={dropdownOpen ? 'rotated' : ''} />
+              </button>
+              {dropdownOpen && (
+                <div className="timeframe-dropdown-menu">
+                  {TIMEFRAMES.map((tf) => (
+                    <button
+                      key={tf.value}
+                      className={`timeframe-option ${selectedTimeframe === tf.value ? 'active' : ''}`}
+                      onClick={() => handleTimeframeChange(tf.value)}
+                    >
+                      {tf.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-            <span className="strength-text-modal">Strength: {signal.strength}%</span>
+
+            {/* Sync Button */}
+            <button
+              className="chart-sync-btn"
+              onClick={handleSyncTimeframe}
+              disabled={syncing || loading}
+              title="Sync data for this timeframe"
+            >
+              <RefreshCw size={16} className={syncing ? 'spinning' : ''} />
+            </button>
+          </div>
+
+          <div className="chart-modal-info">
+            <div className={`signal-badge-modal ${chartSignal.signal.toLowerCase()}`}>
+              <span>{chartSignal.signal}</span>
+            </div>
+            <span className="strength-text-modal">Strength: {chartSignal.strength}%</span>
           </div>
           <button className="chart-modal-close" onClick={onClose}>
             <X size={24} />
@@ -75,13 +232,30 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles, symbol, trades
         </div>
 
         <div className="chart-modal-body" ref={chartBodyRef}>
-          {chartHeight > 0 && (
+          {loading ? (
+            <div className="chart-loading">
+              <RefreshCw size={32} className="spinning" />
+              <span>Loading {selectedTimeframe} data...</span>
+            </div>
+          ) : chartCandles.length === 0 ? (
+            <div className="chart-no-data">
+              <p>No {selectedTimeframe} data available for {symbol}</p>
+              <button
+                className="btn btn-primary"
+                onClick={handleSyncTimeframe}
+                disabled={syncing}
+              >
+                <RefreshCw size={16} className={syncing ? 'spinning' : ''} />
+                {syncing ? 'Syncing...' : `Sync ${selectedTimeframe} Data`}
+              </button>
+            </div>
+          ) : chartHeight > 0 && (
             <TradingChartWithIndicators
-              data={candles}
+              data={chartCandles}
               height={chartHeight}
-              currentSignal={signal.signal}
+              currentSignal={chartSignal.signal}
               strategyName={strategy}
-              indicators={signal.indicators}
+              indicators={chartSignal.indicators}
               trades={trades}
             />
           )}
@@ -91,13 +265,13 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles, symbol, trades
           <div className="chart-modal-details">
             <div className="detail-item">
               <span className="detail-label">Reason:</span>
-              <span className="detail-value">{signal.reason}</span>
+              <span className="detail-value">{chartSignal.reason}</span>
             </div>
-            {signal.indicators && Object.keys(signal.indicators).length > 0 && (
+            {chartSignal.indicators && Object.keys(chartSignal.indicators).length > 0 && (
               <div className="detail-item">
                 <span className="detail-label">Indicators:</span>
                 <div className="indicators-list-modal">
-                  {Object.entries(signal.indicators)
+                  {Object.entries(chartSignal.indicators)
                     .filter(([key]) => !key.includes('_line') && !key.includes('timestamps'))
                     .slice(0, 6)
                     .map(([key, value]) => (

@@ -232,6 +232,17 @@ def get_candle_sync_status(symbol: str, db: Session = Depends(get_db)):
     return get_sync_status(db, symbol)
 
 
+@app.post("/candles/cleanup-duplicates", tags=["Candles"])
+def cleanup_duplicate_candles(symbol: Optional[str] = None, db: Session = Depends(get_db)):
+    """
+    Remove duplicate candles from the database.
+    If symbol is provided, only cleans duplicates for that symbol.
+    Otherwise, cleans all duplicates.
+    """
+    from services.candle_service import remove_duplicate_candles
+    return remove_duplicate_candles(db, symbol)
+
+
 # ============ TRADES ============
 @app.get("/trades", tags=["Trades"])
 def get_trades(
