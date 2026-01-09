@@ -98,15 +98,44 @@ class Portfolio(Base):
 # ============ HOLDINGS TABLE ============
 class Holding(Base):
     __tablename__ = "holdings"
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     stock_id = Column(Integer, ForeignKey("stocks.id"), nullable=False, unique=True)
     quantity = Column(Integer, default=0)
     avg_buy_price = Column(Float, default=0.0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     stock = relationship("Stock")
+
+
+# ============ STRATEGY SETTINGS TABLE ============
+class StrategySettings(Base):
+    __tablename__ = "strategy_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    strategy = Column(Enum(StrategyType), nullable=False, unique=True)
+
+    # MACD settings
+    macd_fast_period = Column(Integer, default=12)
+    macd_slow_period = Column(Integer, default=26)
+    macd_signal_period = Column(Integer, default=9)
+
+    # RSI settings
+    rsi_period = Column(Integer, default=14)
+    rsi_overbought = Column(Integer, default=70)
+    rsi_oversold = Column(Integer, default=30)
+
+    # MA Crossover settings
+    ma_short_period = Column(Integer, default=20)
+    ma_long_period = Column(Integer, default=50)
+    ma_type = Column(String(10), default="EMA")  # SMA or EMA
+
+    # Bollinger Bands settings
+    bollinger_period = Column(Integer, default=20)
+    bollinger_std_dev = Column(Float, default=2.0)
+
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 # ============ DATABASE SETUP ============

@@ -42,6 +42,13 @@ export const signalsAPI = {
   getStrategies: () => api.get('/strategies'),
 };
 
+// Strategy Settings API
+export const strategySettingsAPI = {
+  getAll: () => api.get('/strategy-settings'),
+  get: (strategy) => api.get(`/strategy-settings/${strategy}`),
+  save: (strategy, settings) => api.post(`/strategy-settings/${strategy}`, settings),
+};
+
 // Trades API
 export const tradesAPI = {
   getAll: (symbol = null, limit = 50) =>

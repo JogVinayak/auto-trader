@@ -128,6 +128,20 @@ const Dashboard = () => {
     );
   };
 
+  // Callback to refresh signals after strategy settings are saved
+  const handleSettingsSaved = async (strategyName) => {
+    if (!selectedStock) return;
+
+    try {
+      console.log(`🔄 Refreshing signals after ${strategyName} settings saved...`);
+      const signalsRes = await signalsAPI.get(selectedStock, '1d');
+      console.log('✅ Signals refreshed:', signalsRes.data);
+      setSignals(signalsRes.data.signals || []);
+    } catch (error) {
+      console.error('Error refreshing signals:', error);
+    }
+  };
+
   const filteredSignals = signals.filter((signal) =>
     selectedStrategies.includes(signal.strategy)
   );
@@ -162,6 +176,7 @@ const Dashboard = () => {
         strategies={strategies}
         selectedStrategies={selectedStrategies}
         onToggleStrategy={handleToggleStrategy}
+        onSettingsSaved={handleSettingsSaved}
       />
 
       <main className="main-content">

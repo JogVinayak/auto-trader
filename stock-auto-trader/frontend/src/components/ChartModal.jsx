@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Maximize2 } from 'lucide-react';
 import TradingChartWithIndicators from './TradingChartWithIndicators';
 import './ChartModal.css';
@@ -31,7 +32,8 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles, symbol, trades
     }
   };
 
-  return (
+  // Use portal to render modal at document body level (above all other elements)
+  return createPortal(
     <div className="chart-modal-overlay" onClick={handleOverlayClick}>
       <div className="chart-modal-content">
         <div className="chart-modal-header">
@@ -88,7 +90,8 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles, symbol, trades
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
