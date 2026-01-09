@@ -1,10 +1,24 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Maximize2 } from 'lucide-react';
 import TradingChartWithIndicators from './TradingChartWithIndicators';
 import './ChartModal.css';
 
 const ChartModal = ({ isOpen, onClose, strategy, signal, candles, symbol, trades = [] }) => {
+  const [chartHeight, setChartHeight] = useState(0);
+  const chartBodyRef = useRef(null);
+
+  // Calculate available height for chart
+  const calculateChartHeight = useCallback(() => {
+    if (chartBodyRef.current) {
+      // Get the actual available height of the chart body container
+      const bodyRect = chartBodyRef.current.getBoundingClientRect();
+      // Subtract padding (20px top + 20px bottom = 40px)
+      const availableHeight = bodyRect.height - 40;
+      setChartHeight(Math.max(availableHeight, 300)); // Minimum 300px
+    }
+  }, []);
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -18,11 +32,19 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles, symbol, trades
     // Prevent body scroll when modal is open
     document.body.style.overflow = 'hidden';
 
+    // Calculate initial height after modal renders
+    const timeoutId = setTimeout(calculateChartHeight, 50);
+
+    // Recalculate on window resize
+    window.addEventListener('resize', calculateChartHeight);
+
     return () => {
       document.removeEventListener('keydown', handleEscape);
+      window.removeEventListener('resize', calculateChartHeight);
+      clearTimeout(timeoutId);
       document.body.style.overflow = 'unset';
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, calculateChartHeight]);
 
   if (!isOpen) return null;
 
@@ -52,15 +74,17 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles, symbol, trades
           </button>
         </div>
 
-        <div className="chart-modal-body">
-          <TradingChartWithIndicators
-            data={candles}
-            height={window.innerHeight - 200}
-            currentSignal={signal.signal}
-            strategyName={strategy}
-            indicators={signal.indicators}
-            trades={trades}
-          />
+        <div className="chart-modal-body" ref={chartBodyRef}>
+          {chartHeight > 0 && (
+            <TradingChartWithIndicators
+              data={candles}
+              height={chartHeight}
+              currentSignal={signal.signal}
+              strategyName={strategy}
+              indicators={signal.indicators}
+              trades={trades}
+            />
+          )}
         </div>
 
         <div className="chart-modal-footer">

@@ -137,15 +137,25 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0; /* Important for flex children to shrink properly */
 }
 
 .chart-modal-body .trading-chart-container {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   height: 100%;
 }
 
+/* Remove the 100% height override - let the component control heights */
 .chart-modal-body .trading-chart {
-  height: 100% !important;
+  flex-shrink: 0;
+}
+
+/* Indicator chart in modal */
+.chart-modal-body .indicator-chart {
+  flex-shrink: 0;
 }
 
 .chart-modal-footer {
