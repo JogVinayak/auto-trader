@@ -503,13 +503,17 @@ const TradingChartWithIndicators = ({
   }, [data, signals, height, currentSignal, strategyName, indicators, trades, needsIndicatorPanel, priceChartHeight, indicatorChartHeight]);
 
   return (
-    <div className="trading-chart-container">
-      <div ref={priceChartContainerRef} className="trading-chart" />
+    <div className="trading-chart-container" style={{ height: `${height}px` }}>
+      <div
+        ref={priceChartContainerRef}
+        className="trading-chart"
+        style={{ height: `${priceChartHeight}px` }}
+      />
       {needsIndicatorPanel && (
         <div
           ref={indicatorChartContainerRef}
           className="indicator-chart"
-          style={{ marginTop: '4px' }}
+          style={{ height: `${indicatorChartHeight}px`, marginTop: '4px' }}
         />
       )}
     </div>
