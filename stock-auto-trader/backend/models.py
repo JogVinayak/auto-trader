@@ -1,6 +1,6 @@
 from datetime import datetime
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Float, DateTime, 
+    create_engine, Column, Integer, BigInteger, String, Float, DateTime,
     Boolean, Enum, ForeignKey, UniqueConstraint, Index
 )
 from sqlalchemy.ext.declarative import declarative_base
@@ -13,7 +13,13 @@ Base = declarative_base()
 class TimeFrame(enum.Enum):
     M1 = "1m"
     M5 = "5m"
+    M15 = "15m"
+    M30 = "30m"
     H1 = "1h"
+    H2 = "2h"
+    H3 = "3h"
+    H4 = "4h"
+    H5 = "5h"
     D1 = "1d"
 
 
@@ -27,6 +33,7 @@ class StrategyType(enum.Enum):
     RSI = "RSI"
     MA_CROSSOVER = "MA_CROSSOVER"
     BOLLINGER = "BOLLINGER"
+    MTF_EMA = "MTF_EMA"
 
 
 # ============ STOCKS TABLE ============
@@ -55,7 +62,7 @@ class Candle(Base):
     high = Column(Float, nullable=False)
     low = Column(Float, nullable=False)
     close = Column(Float, nullable=False)
-    volume = Column(Integer, default=0)
+    volume = Column(BigInteger, default=0)  # BigInteger for crypto volumes
     
     # Relationships
     stock = relationship("Stock", back_populates="candles")
@@ -107,6 +114,59 @@ class Holding(Base):
 
     # Relationships
     stock = relationship("Stock")
+
+
+# ============ INDICATOR VALUES TABLE ============
+class IndicatorValue(Base):
+    """Stores calculated indicator values for each candle"""
+    __tablename__ = "indicator_values"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    candle_id = Column(Integer, ForeignKey("candles.id"), nullable=False)
+    strategy = Column(String(20), nullable=False)  # MACD, RSI, etc.
+
+    # Common indicator fields
+    signal = Column(String(10))  # BUY, SELL, HOLD
+    strength = Column(Integer)  # 0-100
+
+    # MACD specific
+    macd_line = Column(Float)
+    macd_signal = Column(Float)
+    macd_histogram = Column(Float)
+
+    # RSI specific
+    rsi_value = Column(Float)
+
+    # MA Crossover specific
+    short_ma = Column(Float)
+    long_ma = Column(Float)
+
+    # Bollinger specific
+    bb_upper = Column(Float)
+    bb_middle = Column(Float)
+    bb_lower = Column(Float)
+    bb_percent_b = Column(Float)
+
+    # MTF_EMA specific
+    ema_20 = Column(Float)
+    ema_30 = Column(Float)
+    ema_40 = Column(Float)
+    ema_50 = Column(Float)
+    ema_60 = Column(Float)
+    ema_200 = Column(Float)
+    ema_300 = Column(Float)
+    bullish_count = Column(Integer)
+    bearish_count = Column(Integer)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    candle = relationship("Candle", backref="indicators")
+
+    __table_args__ = (
+        UniqueConstraint('candle_id', 'strategy', name='unique_indicator_per_candle'),
+        Index('idx_indicator_lookup', 'candle_id', 'strategy'),
+    )
 
 
 # ============ STRATEGY SETTINGS TABLE ============

@@ -75,11 +75,14 @@ const SignalsTable = ({ signals, symbol }) => {
                 <td className="indicators-cell">
                   {signal.indicators && (
                     <div className="mini-indicators">
-                      {Object.entries(signal.indicators).slice(0, 3).map(([key, value]) => (
+                      {Object.entries(signal.indicators)
+                        .filter(([, value]) => typeof value !== 'object' && !Array.isArray(value))
+                        .slice(0, 3)
+                        .map(([key, value]) => (
                         <div key={key} className="mini-indicator">
                           <span className="mini-indicator-label">{key.replace(/_/g, ' ')}:</span>
                           <span className="mini-indicator-value">
-                            {typeof value === 'number' ? value.toFixed(2) : value}
+                            {typeof value === 'number' ? value.toFixed(2) : String(value)}
                           </span>
                         </div>
                       ))}

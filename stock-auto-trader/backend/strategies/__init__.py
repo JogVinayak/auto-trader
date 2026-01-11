@@ -13,6 +13,7 @@ from .macd import MACDStrategy
 from .rsi import RSIStrategy
 from .ma_crossover import MACrossoverStrategy
 from .bollinger import BollingerStrategy
+from .mtf_ema import MTFEMAStrategy
 
 
 # Registry of all available strategies
@@ -21,6 +22,7 @@ STRATEGIES = {
     "RSI": RSIStrategy,
     "MA_CROSSOVER": MACrossoverStrategy,
     "BOLLINGER": BollingerStrategy,
+    "MTF_EMA": MTFEMAStrategy,
 }
 
 
@@ -64,6 +66,7 @@ __all__ = [
     "RSIStrategy",
     "MACrossoverStrategy",
     "BollingerStrategy",
+    "MTFEMAStrategy",
     "STRATEGIES",
     "get_strategy",
     "get_all_strategies",

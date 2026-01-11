@@ -7,11 +7,23 @@ from models import Stock, Candle, TimeFrame
 
 
 # Timeframe mapping for Yahoo Finance API
+# Note: Yahoo only supports: 1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo
+# 2h, 3h, 4h, 5h are NOT directly supported - we can only use available intervals
 TIMEFRAME_MAP = {
     TimeFrame.M1: {"interval": "1m", "range": "7d"},
     TimeFrame.M5: {"interval": "5m", "range": "60d"},
+    TimeFrame.M15: {"interval": "15m", "range": "60d"},
+    TimeFrame.M30: {"interval": "30m", "range": "60d"},
     TimeFrame.H1: {"interval": "1h", "range": "730d"},
     TimeFrame.D1: {"interval": "1d", "range": "10y"},
+}
+
+# Timeframes that require resampling from 1h data
+RESAMPLE_TIMEFRAMES = {
+    TimeFrame.H2: "2h",
+    TimeFrame.H3: "3h",
+    TimeFrame.H4: "4h",
+    TimeFrame.H5: "5h",
 }
 
 
@@ -56,7 +68,13 @@ def fetch_candles_from_yahoo_api(
     start_timestamp: Optional[int] = None
 ) -> List[Dict]:
     """Fetch candles from Yahoo Finance API directly"""
-    config = TIMEFRAME_MAP[timeframe]
+    # Check if this timeframe needs resampling
+    if timeframe in RESAMPLE_TIMEFRAMES:
+        return _fetch_and_resample_candles(symbol, timeframe, start_timestamp)
+
+    config = TIMEFRAME_MAP.get(timeframe)
+    if not config:
+        raise Exception(f"Unsupported timeframe: {timeframe.value}")
     
     # Yahoo Finance API endpoint
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -112,6 +130,98 @@ def fetch_candles_from_yahoo_api(
             "low": float(quote["low"][i]),
             "close": float(quote["close"][i]),
             "volume": int(quote["volume"][i]) if quote["volume"][i] else 0
+        })
+
+    return candles
+
+
+def _fetch_and_resample_candles(
+    symbol: str,
+    timeframe: TimeFrame,
+    start_timestamp: Optional[int] = None
+) -> List[Dict]:
+    """
+    Fetch 1h candles and resample to higher timeframes (2h, 3h, 4h, 5h).
+    Yahoo Finance doesn't support these intervals directly.
+    """
+    resample_rule = RESAMPLE_TIMEFRAMES.get(timeframe)
+    if not resample_rule:
+        raise Exception(f"No resample rule for timeframe: {timeframe.value}")
+
+    # Fetch 1h candles
+    config = TIMEFRAME_MAP[TimeFrame.H1]
+
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+    params = {
+        "interval": config["interval"],
+        "range": config["range"],
+    }
+
+    if start_timestamp:
+        params.pop("range", None)
+        params["period1"] = start_timestamp
+        params["period2"] = int(datetime.now().timestamp())
+
+    response = requests.get(url, headers=headers, params=params, timeout=30)
+
+    if response.status_code != 200:
+        raise Exception(f"Yahoo API returned status {response.status_code}")
+
+    data = response.json()
+
+    if "chart" not in data or "result" not in data["chart"] or not data["chart"]["result"]:
+        error = data.get("chart", {}).get("error", {})
+        raise Exception(f"Yahoo API error: {error.get('description', 'Unknown error')}")
+
+    result = data["chart"]["result"][0]
+    timestamps = result.get("timestamp", [])
+
+    if not timestamps:
+        return []
+
+    quote = result["indicators"]["quote"][0]
+
+    # Build DataFrame for resampling
+    rows = []
+    for i, ts in enumerate(timestamps):
+        if any(quote[k][i] is None for k in ["open", "high", "low", "close"]):
+            continue
+        rows.append({
+            "timestamp": datetime.fromtimestamp(ts).replace(microsecond=0),
+            "open": float(quote["open"][i]),
+            "high": float(quote["high"][i]),
+            "low": float(quote["low"][i]),
+            "close": float(quote["close"][i]),
+            "volume": int(quote["volume"][i]) if quote["volume"][i] else 0
+        })
+
+    if not rows:
+        return []
+
+    df = pd.DataFrame(rows)
+    df.set_index("timestamp", inplace=True)
+
+    # Resample to target timeframe
+    resampled = df.resample(resample_rule).agg({
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+        "volume": "sum"
+    }).dropna()
+
+    # Convert back to list of dicts
+    candles = []
+    for ts, row in resampled.iterrows():
+        candles.append({
+            "timestamp": ts.to_pydatetime(),
+            "open": row["open"],
+            "high": row["high"],
+            "low": row["low"],
+            "close": row["close"],
+            "volume": int(row["volume"])
         })
 
     return candles

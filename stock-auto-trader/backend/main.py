@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, Dict
 from datetime import datetime
 import os
 
@@ -151,10 +151,14 @@ def get_candles(
         raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
     
     # Map timeframe string to enum
-    tf_map = {"1m": TimeFrame.M1, "5m": TimeFrame.M5, "1h": TimeFrame.H1, "1d": TimeFrame.D1}
+    tf_map = {
+        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
+        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
+        "1d": TimeFrame.D1
+    }
     tf = tf_map.get(timeframe)
     if not tf:
-        raise HTTPException(status_code=400, detail=f"Invalid timeframe. Use: 1m, 5m, 1h, 1d")
+        raise HTTPException(status_code=400, detail=f"Invalid timeframe. Use: 1m, 5m, 15m, 30m, 1h, 2h, 3h, 4h, 5h, 1d")
     
     candles = (
         db.query(Candle)
@@ -184,9 +188,13 @@ def get_latest_candle(symbol: str, timeframe: str = "1d", db: Session = Depends(
     if not stock:
         return {"latest_timestamp": None}
     
-    tf_map = {"1m": TimeFrame.M1, "5m": TimeFrame.M5, "1h": TimeFrame.H1, "1d": TimeFrame.D1}
+    tf_map = {
+        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
+        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
+        "1d": TimeFrame.D1
+    }
     tf = tf_map.get(timeframe)
-    
+
     latest = (
         db.query(Candle)
         .filter(Candle.stock_id == stock.id, Candle.timeframe == tf)
@@ -209,19 +217,44 @@ def sync_stock_candles(
     Sync candles from Yahoo Finance
     - timeframe: 1m, 5m, 1h, 1d (if not provided, syncs all)
     - full_sync: if True, fetches all available history
+    - Automatically calculates indicators after sync
     """
     from services.candle_service import sync_candles, sync_all_timeframes
-    
-    tf_map = {"1m": TimeFrame.M1, "5m": TimeFrame.M5, "1h": TimeFrame.H1, "1d": TimeFrame.D1}
-    
+    from services.indicator_service import calculate_indicators_for_candles
+
+    tf_map = {
+        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
+        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
+        "1d": TimeFrame.D1
+    }
+
+    # Get stock_id for indicator calculation
+    stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+
     if timeframe:
         tf = tf_map.get(timeframe)
         if not tf:
-            raise HTTPException(status_code=400, detail="Invalid timeframe. Use: 1m, 5m, 1h, 1d")
+            raise HTTPException(status_code=400, detail="Invalid timeframe. Use: 1m, 5m, 15m, 30m, 1h, 2h, 3h, 4h, 5h, 1d")
         result = sync_candles(db, symbol, tf, full_sync)
+
+        # Calculate indicators after sync
+        if stock and result.get("new_candles", 0) > 0:
+            indicator_result = calculate_indicators_for_candles(db, stock.id, tf)
+            result["indicators_calculated"] = indicator_result
+
         return result
     else:
         results = sync_all_timeframes(db, symbol, full_sync)
+
+        # Calculate indicators for all timeframes
+        if stock:
+            for tf_name, tf in tf_map.items():
+                indicator_result = calculate_indicators_for_candles(db, stock.id, tf)
+                # Find matching result and add indicator info
+                for r in results:
+                    if r.get("timeframe") == tf_name:
+                        r["indicators_calculated"] = indicator_result
+
         return {"symbol": symbol.upper(), "results": results}
 
 
@@ -324,6 +357,42 @@ def _get_strategy_with_settings(strategy_name: str, db: Session):
     return strategy_class()
 
 
+def _get_mtf_candle_data(db: Session, stock_id: int) -> Dict:
+    """Fetch candle data for all 10 timeframes for MTF_EMA strategy"""
+    import pandas as pd
+
+    tf_map = {
+        "1m": TimeFrame.M1,
+        "5m": TimeFrame.M5,
+        "15m": TimeFrame.M15,
+        "30m": TimeFrame.M30,
+        "1h": TimeFrame.H1,
+        "2h": TimeFrame.H2,
+        "3h": TimeFrame.H3,
+        "4h": TimeFrame.H4,
+        "5h": TimeFrame.H5,
+        "1D": TimeFrame.D1
+    }
+
+    mtf_data = {}
+    for tf_name, tf_enum in tf_map.items():
+        candles = (
+            db.query(Candle)
+            .filter(Candle.stock_id == stock_id, Candle.timeframe == tf_enum)
+            .order_by(Candle.timestamp.asc())
+            .all()
+        )
+
+        if len(candles) >= 305:  # Need enough for EMA 300
+            df = pd.DataFrame([{
+                "timestamp": c.timestamp,
+                "close": c.close
+            } for c in candles])
+            mtf_data[tf_name] = df
+
+    return mtf_data
+
+
 @app.get("/signals/{symbol}", tags=["Signals"])
 def get_signals(
     symbol: str,
@@ -343,10 +412,14 @@ def get_signals(
     if not stock:
         raise HTTPException(status_code=404, detail=f"Stock {symbol} not found. Sync it first.")
 
-    tf_map = {"1m": TimeFrame.M1, "5m": TimeFrame.M5, "1h": TimeFrame.H1, "1d": TimeFrame.D1}
+    tf_map = {
+        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
+        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
+        "1d": TimeFrame.D1
+    }
     tf = tf_map.get(timeframe)
     if not tf:
-        raise HTTPException(status_code=400, detail="Invalid timeframe. Use: 1m, 5m, 1h, 1d")
+        raise HTTPException(status_code=400, detail="Invalid timeframe. Use: 1m, 5m, 15m, 30m, 1h, 2h, 3h, 4h, 5h, 1d")
 
     candles = (
         db.query(Candle)
@@ -375,7 +448,14 @@ def get_signals(
         # Single strategy with DB settings
         try:
             strat = _get_strategy_with_settings(strategy, db)
-            result = strat.calculate(df)
+
+            # MTF_EMA needs data from all timeframes
+            if strategy.upper() == "MTF_EMA":
+                mtf_data = _get_mtf_candle_data(db, stock.id)
+                result = strat.calculate_mtf(df, mtf_data)
+            else:
+                result = strat.calculate(df)
+
             return {
                 "symbol": symbol.upper(),
                 "timeframe": timeframe,
@@ -389,7 +469,13 @@ def get_signals(
         signals = []
         for name in STRATEGIES.keys():
             strat = _get_strategy_with_settings(name, db)
-            result = strat.calculate(df)
+
+            # MTF_EMA needs data from all timeframes
+            if name == "MTF_EMA":
+                mtf_data = _get_mtf_candle_data(db, stock.id)
+                result = strat.calculate_mtf(df, mtf_data)
+            else:
+                result = strat.calculate(df)
             signals.append(result)
 
         # Calculate overall recommendation

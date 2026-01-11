@@ -105,6 +105,86 @@
   max-width: 500px;
 }
 
+.strategies-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.strategies-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+.global-timeframe-dropdown {
+  position: relative;
+}
+
+.timeframe-dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.timeframe-dropdown-btn:hover {
+  border-color: var(--accent-blue);
+}
+
+.timeframe-dropdown-btn svg.rotated {
+  transform: rotate(180deg);
+}
+
+.timeframe-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  min-width: 60px;
+  overflow: hidden;
+}
+
+.timeframe-option {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.timeframe-option:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.timeframe-option.active {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+
 @media (max-width: 1400px) {
   .strategy-grid {
     grid-template-columns: 1fr;

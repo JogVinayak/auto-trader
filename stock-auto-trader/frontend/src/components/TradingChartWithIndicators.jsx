@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
 import { createChart } from 'lightweight-charts';
+import { useEffect, useRef } from 'react';
 import './TradingChart.css';
 
 const TradingChartWithIndicators = ({
@@ -244,10 +244,68 @@ const TradingChartWithIndicators = ({
         if (middleData.length > 0) middleBandSeries.setData(middleData);
         if (lowerData.length > 0) lowerBandSeries.setData(lowerData);
       }
+
+      // MTF_EMA - 7 EMA lines with dynamic colors
+      if (strategyName === 'MTF_EMA' && indicators.ema_lines && indicators.ema_trends) {
+        const emaPeriods = [20, 30, 40, 50, 60, 200, 300];
+        const bullishColor = '#10b981';  // lime/green
+        const bearishColor = '#a855f7';  // purple
+
+        emaPeriods.forEach((period) => {
+          const emaKey = `ema_${period}`;
+          const emaValues = indicators.ema_lines[emaKey];
+          const isBullish = indicators.ema_trends[emaKey];
+
+          if (emaValues && emaValues.length > 0) {
+            const emaSeries = priceChart.addLineSeries({
+              color: isBullish ? bullishColor : bearishColor,
+              lineWidth: period >= 200 ? 2 : 1,
+              title: `EMA ${period}`,
+              priceLineVisible: false,
+              lastValueVisible: period === 200 || period === 300,
+            });
+
+            const emaData = alignIndicatorData(emaValues, timestamps);
+            if (emaData.length > 0) emaSeries.setData(emaData);
+          }
+        });
+
+        // Add crossover markers
+        if (indicators.crossover_signals && indicators.crossover_signals.length > 0) {
+          const crossoverMarkers = indicators.crossover_signals.map(signal => {
+            const idx = signal.index;
+            if (idx >= 0 && idx < formattedData.length) {
+              return {
+                time: formattedData[idx].time,
+                position: signal.type === 'up' ? 'belowBar' : 'aboveBar',
+                color: signal.type === 'up' ? bullishColor : bearishColor,
+                shape: signal.type === 'up' ? 'arrowUp' : 'arrowDown',
+                text: `EMA${signal.ema}`,
+                size: 1,
+              };
+            }
+            return null;
+          }).filter(m => m !== null);
+
+          if (crossoverMarkers.length > 0) {
+            // Merge with existing markers
+            const allMarkers = [...markers, ...crossoverMarkers];
+            candlestickSeries.setMarkers(allMarkers.sort((a, b) => a.time - b.time));
+          }
+        }
+      }
     }
 
     // Create indicator panel for MACD/RSI (TradingView style - separate synced panel)
     let indicatorChart = null;
+    let priceContainer = null;
+    let indicatorContainer = null;
+    let priceWheelHandler = null;
+    let indicatorWheelHandler = null;
+    let priceDragHandler = null;
+    let indicatorDragHandler = null;
+    let pendingSync = null;
+
     if (needsIndicatorPanel && indicatorChartContainerRef.current && indicators) {
       const timestamps = indicators.timestamps || [];
 
@@ -416,31 +474,80 @@ const TradingChartWithIndicators = ({
       }
 
       // TradingView-style synchronized scrolling and zooming
+      // Using a more immediate sync approach to eliminate lag
       let isSyncing = false;
 
-      const syncTimeScale = (sourceChart, targetChart) => {
+      const syncTimeScaleImmediate = (sourceChart, targetChart) => {
         if (isSyncing) return;
-        isSyncing = true;
 
         const sourceTimeScale = sourceChart.timeScale();
         const targetTimeScale = targetChart.timeScale();
-
         const logicalRange = sourceTimeScale.getVisibleLogicalRange();
-        if (logicalRange) {
-          targetTimeScale.setVisibleLogicalRange(logicalRange);
-        }
 
-        isSyncing = false;
+        if (logicalRange) {
+          isSyncing = true;
+          targetTimeScale.setVisibleLogicalRange(logicalRange);
+          isSyncing = false;
+        }
       };
 
-      // Sync on visible range change (zoom/scroll)
+      // Use requestAnimationFrame for smoother batched updates
+      const syncWithRAF = (sourceChart, targetChart) => {
+        if (pendingSync) {
+          cancelAnimationFrame(pendingSync);
+        }
+        pendingSync = requestAnimationFrame(() => {
+          syncTimeScaleImmediate(sourceChart, targetChart);
+          pendingSync = null;
+        });
+      };
+
+      // Subscribe to visible range changes
       priceChart.timeScale().subscribeVisibleLogicalRangeChange(() => {
-        syncTimeScale(priceChart, indicatorChart);
+        if (!isSyncing) {
+          syncWithRAF(priceChart, indicatorChart);
+        }
       });
 
       indicatorChart.timeScale().subscribeVisibleLogicalRangeChange(() => {
-        syncTimeScale(indicatorChart, priceChart);
+        if (!isSyncing) {
+          syncWithRAF(indicatorChart, priceChart);
+        }
       });
+
+      // Intercept wheel events to sync immediately on user interaction
+      // This provides instant feedback before the chart's internal handler runs
+      const handleWheel = (sourceChart, targetChart) => () => {
+        // Let the default handler process first, then sync immediately
+        requestAnimationFrame(() => {
+          syncTimeScaleImmediate(sourceChart, targetChart);
+        });
+      };
+
+      priceWheelHandler = handleWheel(priceChart, indicatorChart);
+      indicatorWheelHandler = handleWheel(indicatorChart, priceChart);
+
+      priceChartContainerRef.current?.addEventListener('wheel', priceWheelHandler, { passive: true });
+      indicatorChartContainerRef.current?.addEventListener('wheel', indicatorWheelHandler, { passive: true });
+
+      // Also sync on mouse drag (for panning)
+      const handleMouseMove = (sourceChart, targetChart) => (e) => {
+        if (e.buttons === 1) { // Left mouse button pressed (dragging)
+          requestAnimationFrame(() => {
+            syncTimeScaleImmediate(sourceChart, targetChart);
+          });
+        }
+      };
+
+      priceDragHandler = handleMouseMove(priceChart, indicatorChart);
+      indicatorDragHandler = handleMouseMove(indicatorChart, priceChart);
+
+      priceChartContainerRef.current?.addEventListener('mousemove', priceDragHandler);
+      indicatorChartContainerRef.current?.addEventListener('mousemove', indicatorDragHandler);
+
+      // Store container refs for cleanup
+      priceContainer = priceChartContainerRef.current;
+      indicatorContainer = indicatorChartContainerRef.current;
 
       // Sync crosshair movement
       priceChart.subscribeCrosshairMove((param) => {
@@ -495,10 +602,25 @@ const TradingChartWithIndicators = ({
     // Cleanup
     return () => {
       window.removeEventListener('resize', handleResize);
-      priceChart.remove();
+
+      // Remove wheel and mouse event listeners for chart sync
       if (indicatorChart) {
+        if (priceContainer) {
+          priceContainer.removeEventListener('wheel', priceWheelHandler);
+          priceContainer.removeEventListener('mousemove', priceDragHandler);
+        }
+        if (indicatorContainer) {
+          indicatorContainer.removeEventListener('wheel', indicatorWheelHandler);
+          indicatorContainer.removeEventListener('mousemove', indicatorDragHandler);
+        }
+        // Cancel any pending sync
+        if (pendingSync) {
+          cancelAnimationFrame(pendingSync);
+        }
         indicatorChart.remove();
       }
+
+      priceChart.remove();
     };
   }, [data, signals, height, currentSignal, strategyName, indicators, trades, needsIndicatorPanel, priceChartHeight, indicatorChartHeight]);
 

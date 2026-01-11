@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, DollarSign, TrendingUp } from 'lucide-react';
+import { RefreshCw, DollarSign, TrendingUp, ChevronDown } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
 import StrategyCard from '../components/StrategyCard';
 import SignalsTable from '../components/SignalsTable';
@@ -18,6 +18,8 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
+  const [globalTimeframe, setGlobalTimeframe] = useState('1d');
+  const [timeframeDropdownOpen, setTimeframeDropdownOpen] = useState(false);
 
   // Fetch initial data
   useEffect(() => {
@@ -210,6 +212,32 @@ const Dashboard = () => {
           </div>
         </div>
 
+        <div className="strategies-header">
+          <h2>STRATEGIES</h2>
+          <div className="global-timeframe-dropdown">
+            <button
+              className="timeframe-dropdown-btn"
+              onClick={() => setTimeframeDropdownOpen(!timeframeDropdownOpen)}
+            >
+              <span>{globalTimeframe}</span>
+              <ChevronDown size={14} className={timeframeDropdownOpen ? 'rotated' : ''} />
+            </button>
+            {timeframeDropdownOpen && (
+              <div className="timeframe-dropdown-menu">
+                {['1m', '5m', '1h', '1d'].map((tf) => (
+                  <button
+                    key={tf}
+                    className={`timeframe-option ${globalTimeframe === tf ? 'active' : ''}`}
+                    onClick={() => { setGlobalTimeframe(tf); setTimeframeDropdownOpen(false); }}
+                  >
+                    {tf}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         {filteredSignals.length === 0 ? (
           <div className="no-signals">
             <h3>No signals available</h3>
@@ -241,6 +269,7 @@ const Dashboard = () => {
                   candles={candles}
                   trades={trades}
                   symbol={selectedStock}
+                  globalTimeframe={globalTimeframe}
                 />
               ))}
             </div>

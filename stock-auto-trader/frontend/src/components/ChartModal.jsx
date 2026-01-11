@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Maximize2, RefreshCw, ChevronDown } from 'lucide-react';
 import TradingChartWithIndicators from './TradingChartWithIndicators';
+import MTFDashboard from './MTFDashboard';
 import { candlesAPI, signalsAPI } from '../services/api';
 import './ChartModal.css';
 
@@ -221,10 +222,10 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles: initialCandles
           </div>
 
           <div className="chart-modal-info">
-            <div className={`signal-badge-modal ${chartSignal.signal.toLowerCase()}`}>
-              <span>{chartSignal.signal}</span>
+            <div className={`signal-badge-modal ${(chartSignal?.signal || 'hold').toLowerCase()}`}>
+              <span>{chartSignal?.signal || 'HOLD'}</span>
             </div>
-            <span className="strength-text-modal">Strength: {chartSignal.strength}%</span>
+            <span className="strength-text-modal">Strength: {chartSignal?.strength || 0}%</span>
           </div>
           <button className="chart-modal-close" onClick={onClose}>
             <X size={24} />
@@ -232,12 +233,25 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles: initialCandles
         </div>
 
         <div className="chart-modal-body" ref={chartBodyRef}>
+          {/* MTF Dashboard for MTF_EMA strategy - positioned top right */}
+          {strategy === 'MTF_EMA' && chartSignal?.indicators?.trend_dashboard && (
+            <div className="mtf-dashboard-modal-overlay">
+              <MTFDashboard
+                trendDashboard={chartSignal.indicators.trend_dashboard}
+                bullishCount={chartSignal.indicators.bullish_count}
+                bearishCount={chartSignal.indicators.bearish_count}
+                totalCells={chartSignal.indicators.total_cells}
+                compact={true}
+              />
+            </div>
+          )}
+
           {loading ? (
             <div className="chart-loading">
               <RefreshCw size={32} className="spinning" />
               <span>Loading {selectedTimeframe} data...</span>
             </div>
-          ) : chartCandles.length === 0 ? (
+          ) : !chartCandles || chartCandles.length === 0 ? (
             <div className="chart-no-data">
               <p>No {selectedTimeframe} data available for {symbol}</p>
               <button
@@ -253,9 +267,9 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles: initialCandles
             <TradingChartWithIndicators
               data={chartCandles}
               height={chartHeight}
-              currentSignal={chartSignal.signal}
+              currentSignal={chartSignal?.signal || 'HOLD'}
               strategyName={strategy}
-              indicators={chartSignal.indicators}
+              indicators={chartSignal?.indicators || {}}
               trades={trades}
             />
           )}
@@ -265,20 +279,20 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles: initialCandles
           <div className="chart-modal-details">
             <div className="detail-item">
               <span className="detail-label">Reason:</span>
-              <span className="detail-value">{chartSignal.reason}</span>
+              <span className="detail-value">{chartSignal?.reason || 'No signal data'}</span>
             </div>
-            {chartSignal.indicators && Object.keys(chartSignal.indicators).length > 0 && (
+            {chartSignal?.indicators && Object.keys(chartSignal.indicators).length > 0 && (
               <div className="detail-item">
                 <span className="detail-label">Indicators:</span>
                 <div className="indicators-list-modal">
                   {Object.entries(chartSignal.indicators)
-                    .filter(([key]) => !key.includes('_line') && !key.includes('timestamps'))
+                    .filter(([key, value]) => !key.includes('_line') && !key.includes('timestamps') && typeof value !== 'object')
                     .slice(0, 6)
                     .map(([key, value]) => (
                       <div key={key} className="indicator-chip">
                         <span className="indicator-chip-label">{key.replace(/_/g, ' ').toUpperCase()}:</span>
                         <span className="indicator-chip-value">
-                          {typeof value === 'number' ? value.toFixed(2) : value}
+                          {typeof value === 'number' ? value.toFixed(2) : String(value)}
                         </span>
                       </div>
                     ))}

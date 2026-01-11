@@ -53,6 +53,10 @@
   background: linear-gradient(135deg, var(--accent-purple), var(--accent-red));
 }
 
+.strategy-icon.mtf_ema {
+  background: linear-gradient(135deg, #10b981, #a855f7);
+}
+
 .strategy-name h3 {
   font-size: 18px;
   font-weight: 600;
@@ -206,8 +210,8 @@
 
 .chart-controls {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: -32px;
+  left: 0;
   z-index: 10;
   display: flex;
   align-items: center;

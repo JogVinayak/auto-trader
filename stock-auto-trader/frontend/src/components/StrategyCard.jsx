@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
-import { TrendingUp, TrendingDown, Minus, Maximize2, ChevronDown, RefreshCw } from 'lucide-react';
-import TradingChartWithIndicators from './TradingChartWithIndicators';
-import TradesTable from './TradesTable';
-import ChartModal from './ChartModal';
+import { ChevronDown, Maximize2, Minus, RefreshCw, TrendingDown, TrendingUp } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { candlesAPI, signalsAPI } from '../services/api';
+import ChartModal from './ChartModal';
+import MTFDashboard from './MTFDashboard';
 import './StrategyCard.css';
+import TradesTable from './TradesTable';
+import TradingChartWithIndicators from './TradingChartWithIndicators';
 
 const TIMEFRAMES = [
   { value: '1m', label: '1m' },
@@ -13,7 +14,7 @@ const TIMEFRAMES = [
   { value: '1d', label: '1d' },
 ];
 
-const StrategyCard = ({ strategy, signal: initialSignal, candles: initialCandles, trades = [], symbol }) => {
+const StrategyCard = ({ strategy, signal: initialSignal, candles: initialCandles, trades = [], symbol, globalTimeframe = '1d' }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Timeframe state
@@ -29,8 +30,21 @@ const StrategyCard = ({ strategy, signal: initialSignal, candles: initialCandles
   useEffect(() => {
     setChartCandles(initialCandles);
     setChartSignal(initialSignal);
-    setSelectedTimeframe('1d');
-  }, [initialCandles, initialSignal]);
+    setSelectedTimeframe(globalTimeframe);
+  }, [initialCandles, initialSignal, globalTimeframe]);
+
+  // Sync with global timeframe changes
+  useEffect(() => {
+    if (globalTimeframe !== selectedTimeframe) {
+      setSelectedTimeframe(globalTimeframe);
+      if (globalTimeframe !== '1d') {
+        fetchCandlesForTimeframe(globalTimeframe);
+      } else {
+        setChartCandles(initialCandles);
+        setChartSignal(initialSignal);
+      }
+    }
+  }, [globalTimeframe]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -139,6 +153,7 @@ const StrategyCard = ({ strategy, signal: initialSignal, candles: initialCandles
       RSI: '📈',
       MA_CROSSOVER: '〰️',
       BOLLINGER: '📉',
+      MTF_EMA: '📶',
     };
     return icons[strategyName] || '📊';
   };
@@ -177,20 +192,30 @@ const StrategyCard = ({ strategy, signal: initialSignal, candles: initialCandles
         </div>
       </div>
 
-      {displaySignal?.indicators && Object.keys(displaySignal.indicators).length > 0 && (
+      {/* MTF_EMA Dashboard */}
+      {strategy === 'MTF_EMA' && displaySignal?.indicators?.trend_dashboard && (
+        <MTFDashboard
+          trendDashboard={displaySignal.indicators.trend_dashboard}
+          bullishCount={displaySignal.indicators.bullish_count}
+          bearishCount={displaySignal.indicators.bearish_count}
+          totalCells={displaySignal.indicators.total_cells}
+        />
+      )}
+
+      {displaySignal?.indicators && Object.keys(displaySignal.indicators).length > 0 && strategy !== 'MTF_EMA' && (
         <div className="indicators-section">
           <h4>Indicators</h4>
           <div className="indicators-grid">
             {Object.entries(displaySignal.indicators).map(([key, value]) => {
-              // Skip array-type values (used for chart plotting)
-              if (Array.isArray(value)) {
+              // Skip array-type and object-type values
+              if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
                 return null;
               }
               return (
                 <div key={key} className="indicator-item">
                   <span className="indicator-label">{key.replace(/_/g, ' ').toUpperCase()}</span>
                   <span className="indicator-value">
-                    {typeof value === 'number' ? value.toFixed(2) : value}
+                    {typeof value === 'number' ? value.toFixed(2) : String(value)}
                   </span>
                 </div>
               );
