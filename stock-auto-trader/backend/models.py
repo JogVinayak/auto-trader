@@ -53,10 +53,10 @@ class Stock(Base):
 # ============ CANDLES TABLE ============
 class Candle(Base):
     __tablename__ = "candles"
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     stock_id = Column(Integer, ForeignKey("stocks.id"), nullable=False)
-    timeframe = Column(Enum(TimeFrame), nullable=False)
+    timeframe = Column(Enum(TimeFrame, values_callable=lambda x: [e.value for e in x]), nullable=False)
     timestamp = Column(DateTime, nullable=False)
     open = Column(Float, nullable=False)
     high = Column(Float, nullable=False)
@@ -77,11 +77,11 @@ class Candle(Base):
 # ============ TRADES TABLE ============
 class Trade(Base):
     __tablename__ = "trades"
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     stock_id = Column(Integer, ForeignKey("stocks.id"), nullable=False)
-    trade_type = Column(Enum(TradeType), nullable=False)
-    strategy = Column(Enum(StrategyType), nullable=False)
+    trade_type = Column(Enum(TradeType, values_callable=lambda x: [e.value for e in x]), nullable=False)
+    strategy = Column(Enum(StrategyType, values_callable=lambda x: [e.value for e in x]), nullable=False)
     quantity = Column(Integer, nullable=False)
     price = Column(Float, nullable=False)
     total_value = Column(Float, nullable=False)
@@ -174,7 +174,7 @@ class StrategySettings(Base):
     __tablename__ = "strategy_settings"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    strategy = Column(Enum(StrategyType), nullable=False, unique=True)
+    strategy = Column(Enum(StrategyType, values_callable=lambda x: [e.value for e in x]), nullable=False, unique=True)
 
     # MACD settings
     macd_fast_period = Column(Integer, default=12)
