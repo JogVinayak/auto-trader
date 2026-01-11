@@ -18,12 +18,55 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 12px;
 }
 
 .strategy-name {
   display: flex;
   align-items: flex-start;
   gap: 12px;
+  flex: 1;
+}
+
+.strategy-timeframe-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.strategy-timeframe-selector svg {
+  color: var(--text-secondary);
+}
+
+.strategy-timeframe-dropdown {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.strategy-timeframe-dropdown:hover {
+  background: var(--bg-card);
+}
+
+.strategy-timeframe-dropdown:focus {
+  outline: none;
+  background: var(--bg-card);
+}
+
+.strategy-timeframe-dropdown option {
+  background: var(--bg-card);
+  color: var(--text-primary);
 }
 
 .strategy-icon {
@@ -51,6 +94,10 @@
 
 .strategy-icon.bollinger {
   background: linear-gradient(135deg, var(--accent-purple), var(--accent-red));
+}
+
+.strategy-icon.rsi_w_pattern {
+  background: linear-gradient(135deg, var(--accent-orange), var(--accent-purple));
 }
 
 .strategy-name h3 {

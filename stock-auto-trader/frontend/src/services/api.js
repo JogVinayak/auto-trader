@@ -55,4 +55,26 @@ export const tradesAPI = {
     api.get('/trades', { params: { symbol, limit } }),
 };
 
+// Backtest API
+export const backtestAPI = {
+  run: (symbol, strategy, timeframe, startDate, endDate, initialCapital, positionSize) =>
+    api.post('/backtest/run', null, {
+      params: {
+        symbol,
+        strategy,
+        timeframe,
+        start_date: startDate,
+        end_date: endDate,
+        initial_capital: initialCapital,
+        position_size: positionSize,
+      },
+    }),
+  getDataAvailability: (symbol) =>
+    api.get('/backtest/data-availability', { params: { symbol } }),
+  loadData: (symbol, timeframe, period = '2y') =>
+    api.post('/backtest/load-data', null, {
+      params: { symbol, timeframe, period },
+    }),
+};
+
 export default api;

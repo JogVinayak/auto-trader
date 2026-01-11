@@ -37,6 +37,14 @@ const StrategySettingsModal = ({ isOpen, onClose, strategy, onSave }) => {
       period: { value: 20, label: 'Period', min: 10, max: 50, description: 'Bollinger Bands period' },
       std_dev: { value: 2, label: 'Standard Deviation', min: 1, max: 4, step: 0.5, description: 'Number of standard deviations' },
     },
+    RSI_W_PATTERN: {
+      rsi_period: { value: 14, label: 'RSI Period', min: 5, max: 30, description: 'RSI calculation period' },
+      oversold_threshold: { value: 30, label: 'Oversold Threshold', min: 20, max: 40, description: 'RSI level for W-pattern detection' },
+      overbought_threshold: { value: 70, label: 'Overbought Threshold', min: 60, max: 80, description: 'RSI level for M-pattern detection' },
+      min_distance: { value: 3, label: 'Min Distance', min: 2, max: 10, description: 'Minimum candles between pattern points' },
+      max_distance: { value: 10, label: 'Max Distance', min: 5, max: 30, description: 'Maximum candles between pattern points' },
+      tolerance: { value: 3, label: 'Pattern Tolerance', min: 1, max: 10, step: 0.5, description: 'RSI point tolerance for pattern validation' },
+    },
   };
 
   // Fetch settings from database when modal opens

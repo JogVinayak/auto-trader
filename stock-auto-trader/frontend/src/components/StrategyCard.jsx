@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { TrendingUp, TrendingDown, Minus, Maximize2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, Maximize2, Clock } from 'lucide-react';
 import TradingChartWithIndicators from './TradingChartWithIndicators';
 import TradesTable from './TradesTable';
 import ChartModal from './ChartModal';
 import './StrategyCard.css';
 
-const StrategyCard = ({ strategy, signal, candles, trades = [], symbol }) => {
+const StrategyCard = ({ strategy, signal, candles, trades = [], symbol, timeframe, onTimeframeChange }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const getSignalIcon = (signalType) => {
     switch (signalType) {
@@ -35,6 +35,7 @@ const StrategyCard = ({ strategy, signal, candles, trades = [], symbol }) => {
       RSI: '📈',
       MA_CROSSOVER: '〰️',
       BOLLINGER: '📉',
+      RSI_W_PATTERN: '📐',
     };
     return icons[strategyName] || '📊';
   };
@@ -48,9 +49,25 @@ const StrategyCard = ({ strategy, signal, candles, trades = [], symbol }) => {
           </div>
           <div>
             <h3>{strategy.replace('_', ' ')}</h3>
-            <p className="strategy-description">{signal.reason}</p>
+            <p className="strategy-description">{signal.reason || 'No description available'}</p>
           </div>
         </div>
+        {onTimeframeChange && (
+          <div className="strategy-timeframe-selector">
+            <Clock size={14} />
+            <select
+              value={timeframe}
+              onChange={(e) => onTimeframeChange(e.target.value)}
+              className="strategy-timeframe-dropdown"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <option value="1m">1m</option>
+              <option value="5m">5m</option>
+              <option value="1h">1h</option>
+              <option value="1d">1d</option>
+            </select>
+          </div>
+        )}
       </div>
 
       <div className="signal-section">
@@ -75,15 +92,16 @@ const StrategyCard = ({ strategy, signal, candles, trades = [], symbol }) => {
           <h4>Indicators</h4>
           <div className="indicators-grid">
             {Object.entries(signal.indicators).map(([key, value]) => {
-              // Skip array-type values (used for chart plotting)
-              if (Array.isArray(value)) {
+              // Skip array-type values and object-type values (used for chart plotting or complex data)
+              if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
                 return null;
               }
+              // Only render primitive values (numbers, strings, booleans)
               return (
                 <div key={key} className="indicator-item">
                   <span className="indicator-label">{key.replace(/_/g, ' ').toUpperCase()}</span>
                   <span className="indicator-value">
-                    {typeof value === 'number' ? value.toFixed(2) : value}
+                    {typeof value === 'number' ? value.toFixed(2) : String(value)}
                   </span>
                 </div>
               );
@@ -104,7 +122,7 @@ const StrategyCard = ({ strategy, signal, candles, trades = [], symbol }) => {
           </button>
           <TradingChartWithIndicators
             data={candles}
-            height={300}
+            height={900}
             currentSignal={signal.signal}
             strategyName={strategy}
             indicators={signal.indicators}

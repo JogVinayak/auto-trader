@@ -41,7 +41,8 @@ A paper trading (simulated) stock market application focused on Indian stocks an
 │   │   ├── macd.py             # MACD crossover
 │   │   ├── rsi.py              # RSI overbought/oversold
 │   │   ├── ma_crossover.py     # Moving average crossover
-│   │   └── bollinger.py        # Bollinger Bands
+│   │   ├── bollinger.py        # Bollinger Bands
+│   │   └── rsi_w_pattern.py    # RSI W/M-Pattern reversal
 │   ├── add_indian_stocks.py    # Populate Indian stocks
 │   └── add_test_trades.py      # Demo trade data
 ├── frontend/
@@ -80,7 +81,7 @@ A paper trading (simulated) stock market application focused on Indian stocks an
 ### Enums
 - **TimeFrame**: 1m, 5m, 1h, 1d
 - **TradeType**: BUY, SELL
-- **StrategyType**: MACD, RSI, MA_CROSSOVER, BOLLINGER
+- **StrategyType**: MACD, RSI, MA_CROSSOVER, BOLLINGER, RSI_W_PATTERN
 
 ## API Endpoints
 
@@ -132,10 +133,19 @@ A paper trading (simulated) stock market application focused on Indian stocks an
 - **SELL**: Price at/above upper band (overbought)
 - **Params**: period=20, std_dev=2.0
 
+### 5. RSI W-Pattern / M-Pattern (Reversal Signals)
+- **BUY**: W-Pattern detected - RSI forms double bottom in oversold zone (<30) with second bottom ≥ first, then breaks above middle peak
+- **SELL**: M-Pattern detected - RSI forms double top in overbought zone (>70) with second top ≤ first, then breaks below middle valley
+- **Params**: rsi_period=14, oversold_threshold=30, overbought_threshold=70, min_distance=3, max_distance=10, tolerance=3.0
+- **Features**:
+  - Detects bullish reversals (W-pattern) when selling pressure weakens in oversold territory
+  - Detects bearish reversals (M-pattern) when buying pressure weakens in overbought territory
+  - Configurable distance between pattern points and RSI tolerance for validation
+
 ## Key Features
 
 1. **Paper Trading** - Simulated trading with $10,000 starting capital
-2. **Multi-Strategy Analysis** - 4 complementary technical indicators
+2. **Multi-Strategy Analysis** - 5 complementary technical indicators
 3. **Real-time Data** - Yahoo Finance API with multiple timeframes
 4. **Signal Strength** - 0-100 strength metric per signal
 5. **Trade History** - Complete trade logging with P&L tracking

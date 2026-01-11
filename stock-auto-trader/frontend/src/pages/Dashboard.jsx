@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, DollarSign, TrendingUp } from 'lucide-react';
+import { RefreshCw, DollarSign, TrendingUp, Clock, Activity } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
 import StrategyCard from '../components/StrategyCard';
 import SignalsTable from '../components/SignalsTable';
+import BacktestModal from '../components/BacktestModal';
+import ErrorBoundary from '../components/ErrorBoundary';
 import { stocksAPI, portfolioAPI, candlesAPI, signalsAPI, tradesAPI } from '../services/api';
 import './Dashboard.css';
 
@@ -18,6 +20,9 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
+  const [globalTimeframe, setGlobalTimeframe] = useState('1d');
+  const [strategyTimeframes, setStrategyTimeframes] = useState({});
+  const [isBacktestModalOpen, setIsBacktestModalOpen] = useState(false);
 
   // Fetch initial data
   useEffect(() => {
@@ -62,21 +67,21 @@ const Dashboard = () => {
     fetchInitialData();
   }, []);
 
-  // Fetch stock data when selected stock changes
+  // Fetch stock data when selected stock or global timeframe changes
   useEffect(() => {
     if (!selectedStock) return;
 
     const fetchStockData = async () => {
       try {
-        console.log(`📊 Fetching data for ${selectedStock}...`);
+        console.log(`📊 Fetching data for ${selectedStock} (${globalTimeframe})...`);
 
         // Fetch candles
-        const candlesRes = await candlesAPI.get(selectedStock, '1d', 100);
+        const candlesRes = await candlesAPI.get(selectedStock, globalTimeframe, 100);
         console.log('✅ Candles loaded:', candlesRes.data.length, 'candles');
         setCandles(candlesRes.data);
 
         // Fetch signals for all strategies
-        const signalsRes = await signalsAPI.get(selectedStock, '1d');
+        const signalsRes = await signalsAPI.get(selectedStock, globalTimeframe);
         console.log('✅ Signals loaded:', signalsRes.data);
         setSignals(signalsRes.data.signals || []);
 
@@ -97,7 +102,7 @@ const Dashboard = () => {
     };
 
     fetchStockData();
-  }, [selectedStock]);
+  }, [selectedStock, globalTimeframe]);
 
   const handleSyncCandles = async () => {
     if (!selectedStock) return;
@@ -106,17 +111,43 @@ const Dashboard = () => {
       setSyncing(true);
       await candlesAPI.sync(selectedStock, null, false);
 
-      // Refetch candles and signals
-      const candlesRes = await candlesAPI.get(selectedStock, '1d', 100);
+      // Refetch candles and signals with current timeframe
+      const candlesRes = await candlesAPI.get(selectedStock, globalTimeframe, 100);
       setCandles(candlesRes.data);
 
-      const signalsRes = await signalsAPI.get(selectedStock, '1d');
+      const signalsRes = await signalsAPI.get(selectedStock, globalTimeframe);
       setSignals(signalsRes.data.signals || []);
 
       setSyncing(false);
     } catch (error) {
       console.error('Error syncing candles:', error);
       setSyncing(false);
+    }
+  };
+
+  const handleTimeframeChange = (timeframe) => {
+    setGlobalTimeframe(timeframe);
+    setStrategyTimeframes({}); // Reset individual timeframes when global changes
+  };
+
+  const handleStrategyTimeframeChange = async (strategyName, timeframe) => {
+    try {
+      setStrategyTimeframes(prev => ({
+        ...prev,
+        [strategyName]: timeframe
+      }));
+
+      // Fetch candles and signal for this specific strategy and timeframe
+      const candlesRes = await candlesAPI.get(selectedStock, timeframe, 100);
+      const signalsRes = await signalsAPI.get(selectedStock, timeframe, strategyName);
+
+      // Update signals array with new data for this strategy
+      setSignals(prev => {
+        const filtered = prev.filter(s => s.strategy !== strategyName);
+        return [...filtered, ...signalsRes.data.signals];
+      });
+    } catch (error) {
+      console.error(`Error fetching ${strategyName} data:`, error);
     }
   };
 
@@ -134,7 +165,7 @@ const Dashboard = () => {
 
     try {
       console.log(`🔄 Refreshing signals after ${strategyName} settings saved...`);
-      const signalsRes = await signalsAPI.get(selectedStock, '1d');
+      const signalsRes = await signalsAPI.get(selectedStock, globalTimeframe);
       console.log('✅ Signals refreshed:', signalsRes.data);
       setSignals(signalsRes.data.signals || []);
     } catch (error) {
@@ -199,6 +230,27 @@ const Dashboard = () => {
             )}
           </div>
           <div className="header-actions">
+            <div className="timeframe-selector">
+              <Clock size={16} />
+              <select
+                value={globalTimeframe}
+                onChange={(e) => handleTimeframeChange(e.target.value)}
+                className="timeframe-dropdown"
+              >
+                <option value="1m">1 Minute</option>
+                <option value="5m">5 Minutes</option>
+                <option value="1h">1 Hour</option>
+                <option value="1d">1 Day</option>
+              </select>
+            </div>
+            <button
+              className="btn btn-accent"
+              onClick={() => setIsBacktestModalOpen(true)}
+              title="Run backtest on historical data"
+            >
+              <Activity size={16} />
+              Backtest
+            </button>
             <button
               className="btn btn-secondary"
               onClick={handleSyncCandles}
@@ -234,19 +286,29 @@ const Dashboard = () => {
             <SignalsTable signals={filteredSignals} symbol={selectedStock} />
             <div className="strategy-grid">
               {filteredSignals.map((signal) => (
-                <StrategyCard
-                  key={signal.strategy}
-                  strategy={signal.strategy}
-                  signal={signal}
-                  candles={candles}
-                  trades={trades}
-                  symbol={selectedStock}
-                />
+                <ErrorBoundary key={signal.strategy}>
+                  <StrategyCard
+                    strategy={signal.strategy}
+                    signal={signal}
+                    candles={candles}
+                    trades={trades}
+                    symbol={selectedStock}
+                    timeframe={strategyTimeframes[signal.strategy] || globalTimeframe}
+                    onTimeframeChange={(tf) => handleStrategyTimeframeChange(signal.strategy, tf)}
+                  />
+                </ErrorBoundary>
               ))}
             </div>
           </>
         )}
       </main>
+
+      <BacktestModal
+        isOpen={isBacktestModalOpen}
+        onClose={() => setIsBacktestModalOpen(false)}
+        symbol={selectedStock}
+        strategies={strategies}
+      />
     </div>
   );
 };

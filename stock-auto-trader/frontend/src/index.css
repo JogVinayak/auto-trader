@@ -115,6 +115,15 @@ body {
   box-shadow: 0 0 20px var(--glow-red);
 }
 
+.btn-accent {
+  background: var(--accent-purple);
+  color: white;
+}
+
+.btn-accent:hover {
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+}
+
 /* Card Styles */
 .card {
   background: var(--bg-card);

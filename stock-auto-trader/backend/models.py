@@ -27,6 +27,7 @@ class StrategyType(enum.Enum):
     RSI = "RSI"
     MA_CROSSOVER = "MA_CROSSOVER"
     BOLLINGER = "BOLLINGER"
+    RSI_W_PATTERN = "RSI_W_PATTERN"
 
 
 # ============ STOCKS TABLE ============
@@ -134,6 +135,14 @@ class StrategySettings(Base):
     # Bollinger Bands settings
     bollinger_period = Column(Integer, default=20)
     bollinger_std_dev = Column(Float, default=2.0)
+
+    # RSI W-Pattern settings
+    rsi_w_pattern_period = Column(Integer, default=14)
+    rsi_w_pattern_oversold = Column(Integer, default=30)
+    rsi_w_pattern_overbought = Column(Integer, default=70)
+    rsi_w_pattern_min_distance = Column(Integer, default=3)
+    rsi_w_pattern_max_distance = Column(Integer, default=10)
+    rsi_w_pattern_tolerance = Column(Float, default=3.0)
 
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

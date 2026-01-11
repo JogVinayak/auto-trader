@@ -6,6 +6,7 @@ Available strategies:
 - RSI: Relative Strength Index
 - MA_CROSSOVER: Moving Average Crossover
 - BOLLINGER: Bollinger Bands
+- RSI_W_PATTERN: RSI W-Pattern and M-Pattern (reversal signals)
 """
 
 from .base import BaseStrategy, Signal
@@ -13,6 +14,7 @@ from .macd import MACDStrategy
 from .rsi import RSIStrategy
 from .ma_crossover import MACrossoverStrategy
 from .bollinger import BollingerStrategy
+from .rsi_w_pattern import RSIWPatternStrategy
 
 
 # Registry of all available strategies
@@ -21,6 +23,7 @@ STRATEGIES = {
     "RSI": RSIStrategy,
     "MA_CROSSOVER": MACrossoverStrategy,
     "BOLLINGER": BollingerStrategy,
+    "RSI_W_PATTERN": RSIWPatternStrategy,
 }
 
 
@@ -64,6 +67,7 @@ __all__ = [
     "RSIStrategy",
     "MACrossoverStrategy",
     "BollingerStrategy",
+    "RSIWPatternStrategy",
     "STRATEGIES",
     "get_strategy",
     "get_all_strategies",
