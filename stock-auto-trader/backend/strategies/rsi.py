@@ -38,23 +38,24 @@ class RSIStrategy(BaseStrategy):
         
         return rsi
     
-    def calculate(self, df: pd.DataFrame) -> Dict:
+    def calculate(self, df: pd.DataFrame, full_history: bool = False) -> Dict:
         if len(df) < self.period + 1:
             return self.get_result(Signal.HOLD, 0, "Insufficient data for RSI calculation")
-        
+
         rsi = self.calculate_rsi(df['close'])
-        
+
         current_rsi = rsi.iloc[-1]
         prev_rsi = rsi.iloc[-2]
-        
+
+        # Use full history for backtesting, last 50 for live signals
         indicators = {
             "rsi": round(current_rsi, 2),
             "prev_rsi": round(prev_rsi, 2),
             "oversold": self.oversold,
             "overbought": self.overbought,
-            # Historical data for plotting (last 50 points)
-            "rsi_line": [round(x, 2) for x in rsi.tail(50).tolist()],
-            "timestamps": [str(t) for t in df['timestamp'].tail(50).tolist()]
+            # Historical data for plotting
+            "rsi_line": [round(x, 2) for x in (rsi if full_history else rsi.tail(50)).tolist()],
+            "timestamps": [str(t) for t in (df['timestamp'] if full_history else df['timestamp'].tail(50)).tolist()]
         }
         
         # BUY: RSI crosses above oversold level

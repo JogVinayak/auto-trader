@@ -1,23 +1,37 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { createChart } from 'lightweight-charts';
 import './TradingChart.css';
 
-const TradingChartWithIndicators = ({
+const TradingChartWithIndicators = forwardRef(({
   data,
   signals = [],
   height = 400,
   currentSignal = null,
   strategyName = '',
   indicators = null,
-  trades = []
-}) => {
+  trades = [],
+  scrollToTimestamp = null
+}, ref) => {
   const priceChartContainerRef = useRef(null);
   const indicatorChartContainerRef = useRef(null);
   const priceChartRef = useRef(null);
   const indicatorChartRef = useRef(null);
 
+  // Expose scroll method to parent
+  useImperativeHandle(ref, () => ({
+    scrollToTime: (timestamp) => {
+      if (priceChartRef.current) {
+        const timeScale = priceChartRef.current.timeScale();
+        timeScale.scrollToPosition(0, true);
+        setTimeout(() => {
+          timeScale.scrollToPosition(-50, true); // Center the timestamp
+        }, 100);
+      }
+    }
+  }));
+
   // Determine if we need a separate indicator panel
-  const needsIndicatorPanel = strategyName === 'MACD' || strategyName === 'RSI';
+  const needsIndicatorPanel = strategyName === 'MACD' || strategyName === 'RSI' || strategyName === 'RSI_W_PATTERN';
   const priceChartHeight = needsIndicatorPanel ? height * 0.65 : height;
   const indicatorChartHeight = height * 0.35;
 
@@ -85,11 +99,20 @@ const TradingChartWithIndicators = ({
         rightOffset: 5,
         barSpacing: 6,
         minBarSpacing: 2,
-        tickMarkFormatter: (time) => {
+        tickMarkFormatter: (time, tickMarkType, locale) => {
           const date = new Date(time * 1000);
-          return date.toLocaleString('en-IN', {
-            month: 'short',
-            day: 'numeric',
+
+          // For day boundaries or first tick, show only the date
+          if (tickMarkType === 0) {
+            return date.toLocaleDateString('en-IN', {
+              month: 'short',
+              day: 'numeric',
+              timeZone: 'Asia/Kolkata'
+            });
+          }
+
+          // For other ticks, show only the time
+          return date.toLocaleTimeString('en-IN', {
             hour: '2-digit',
             minute: '2-digit',
             timeZone: 'Asia/Kolkata'
@@ -351,8 +374,8 @@ const TradingChartWithIndicators = ({
         zeroLine.setData(zeroData);
       }
 
-      // RSI Indicator
-      if (strategyName === 'RSI' && indicators.rsi_line) {
+      // RSI Indicator (for both RSI and RSI_W_PATTERN strategies)
+      if ((strategyName === 'RSI' || strategyName === 'RSI_W_PATTERN') && indicators.rsi_line) {
         // Configure RSI scale (0-100)
         indicatorChart.applyOptions({
           rightPriceScale: {
@@ -367,7 +390,7 @@ const TradingChartWithIndicators = ({
         const rsiSeries = indicatorChart.addLineSeries({
           color: '#9C27B0',
           lineWidth: 2,
-          title: 'RSI',
+          title: strategyName === 'RSI_W_PATTERN' ? 'RSI W/M-Pattern' : 'RSI',
           priceScaleId: 'right',
         });
 
@@ -380,11 +403,16 @@ const TradingChartWithIndicators = ({
 
         // Reference lines spanning all candles
         const allTimes = formattedData.map(d => d.time);
-        const overboughtData = allTimes.map(time => ({ time, value: 70 }));
-        const oversoldData = allTimes.map(time => ({ time, value: 30 }));
+
+        // Use thresholds from indicators if available (for RSI_W_PATTERN), otherwise use defaults
+        const overboughtLevel = indicators.overbought_threshold || 70;
+        const oversoldLevel = indicators.oversold_threshold || 30;
+
+        const overboughtData = allTimes.map(time => ({ time, value: overboughtLevel }));
+        const oversoldData = allTimes.map(time => ({ time, value: oversoldLevel }));
         const middleData = allTimes.map(time => ({ time, value: 50 }));
 
-        // Overbought line (70)
+        // Overbought line
         const overboughtLine = indicatorChart.addLineSeries({
           color: '#ef4444',
           lineWidth: 1,
@@ -404,7 +432,7 @@ const TradingChartWithIndicators = ({
         });
         middleLine.setData(middleData);
 
-        // Oversold line (30)
+        // Oversold line
         const oversoldLine = indicatorChart.addLineSeries({
           color: '#10b981',
           lineWidth: 1,
@@ -502,6 +530,22 @@ const TradingChartWithIndicators = ({
     };
   }, [data, signals, height, currentSignal, strategyName, indicators, trades, needsIndicatorPanel, priceChartHeight, indicatorChartHeight]);
 
+  // Effect to scroll to timestamp when it changes
+  useEffect(() => {
+    if (scrollToTimestamp && priceChartRef.current) {
+      const timeScale = priceChartRef.current.timeScale();
+
+      // Scroll to the specific timestamp
+      setTimeout(() => {
+        const range = 100; // Show 100 bars on each side
+        timeScale.setVisibleLogicalRange({
+          from: Math.max(0, scrollToTimestamp - range),
+          to: scrollToTimestamp + range
+        });
+      }, 100);
+    }
+  }, [scrollToTimestamp]);
+
   return (
     <div className="trading-chart-container" style={{ height: `${height}px` }}>
       <div
@@ -518,6 +562,8 @@ const TradingChartWithIndicators = ({
       )}
     </div>
   );
-};
+});
+
+TradingChartWithIndicators.displayName = 'TradingChartWithIndicators';
 
 export default TradingChartWithIndicators;

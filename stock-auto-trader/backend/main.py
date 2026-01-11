@@ -308,6 +308,15 @@ def _get_strategy_with_settings(strategy_name: str, db: Session):
                 period=setting.bollinger_period,
                 std_dev=setting.bollinger_std_dev
             )
+        elif strategy_name.upper() == "RSI_W_PATTERN":
+            return strategy_class(
+                rsi_period=setting.rsi_w_pattern_period,
+                oversold_threshold=setting.rsi_w_pattern_oversold,
+                overbought_threshold=setting.rsi_w_pattern_overbought,
+                min_distance=setting.rsi_w_pattern_min_distance,
+                max_distance=setting.rsi_w_pattern_max_distance,
+                tolerance=setting.rsi_w_pattern_tolerance
+            )
 
     # Return with default settings
     return strategy_class()
@@ -494,6 +503,20 @@ def save_strategy_settings(strategy: str, settings: dict, db: Session = Depends(
         if "std_dev" in settings:
             setting.bollinger_std_dev = settings["std_dev"]
 
+    elif strategy_type == StrategyType.RSI_W_PATTERN:
+        if "rsi_period" in settings:
+            setting.rsi_w_pattern_period = settings["rsi_period"]
+        if "oversold_threshold" in settings:
+            setting.rsi_w_pattern_oversold = settings["oversold_threshold"]
+        if "overbought_threshold" in settings:
+            setting.rsi_w_pattern_overbought = settings["overbought_threshold"]
+        if "min_distance" in settings:
+            setting.rsi_w_pattern_min_distance = settings["min_distance"]
+        if "max_distance" in settings:
+            setting.rsi_w_pattern_max_distance = settings["max_distance"]
+        if "tolerance" in settings:
+            setting.rsi_w_pattern_tolerance = settings["tolerance"]
+
     setting.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(setting)
@@ -526,6 +549,15 @@ def _format_strategy_settings(setting: StrategySettings, strategy_type: Strategy
             "period": setting.bollinger_period,
             "std_dev": setting.bollinger_std_dev,
         }
+    elif strategy_type == StrategyType.RSI_W_PATTERN:
+        return {
+            "rsi_period": setting.rsi_w_pattern_period,
+            "oversold_threshold": setting.rsi_w_pattern_oversold,
+            "overbought_threshold": setting.rsi_w_pattern_overbought,
+            "min_distance": setting.rsi_w_pattern_min_distance,
+            "max_distance": setting.rsi_w_pattern_max_distance,
+            "tolerance": setting.rsi_w_pattern_tolerance,
+        }
     return {}
 
 
@@ -536,6 +568,14 @@ def _get_default_settings(strategy_type: StrategyType) -> dict:
         StrategyType.RSI: {"period": 14, "overbought": 70, "oversold": 30},
         StrategyType.MA_CROSSOVER: {"short_period": 20, "long_period": 50, "ma_type": "EMA"},
         StrategyType.BOLLINGER: {"period": 20, "std_dev": 2.0},
+        StrategyType.RSI_W_PATTERN: {
+            "rsi_period": 14,
+            "oversold_threshold": 30,
+            "overbought_threshold": 70,
+            "min_distance": 3,
+            "max_distance": 10,
+            "tolerance": 3.0
+        },
     }
     return defaults.get(strategy_type, {})
 
@@ -556,6 +596,504 @@ async def startup_event():
 
 
 # ============ RUN SERVER ============
+# ============ BACKTEST ENDPOINTS ============
+@app.post("/backtest/run", tags=["Backtest"])
+def run_backtest(
+    symbol: str,
+    strategy: str,
+    timeframe: str = "1d",
+    start_date: str = "2023-01-01",
+    end_date: str = "2024-01-01",
+    initial_capital: float = 10000.0,
+    position_size: float = 1.0,
+    strategy_params: str = None,  # JSON string of strategy parameters
+    db: Session = Depends(get_db)
+):
+    """
+    Run backtest for a strategy on historical data
+
+    Args:
+        symbol: Stock symbol
+        strategy: Strategy name (MACD, RSI, RSI_W_PATTERN, etc.)
+        timeframe: Candle timeframe (1m, 5m, 1h, 1d)
+        start_date: Backtest start date (YYYY-MM-DD)
+        end_date: Backtest end date (YYYY-MM-DD)
+        initial_capital: Starting capital
+        position_size: Position size as % of capital (0-1)
+        strategy_params: JSON string of strategy-specific parameters
+    """
+    try:
+        from database_manager import db_manager
+        from services.backtest_engine import BacktestEngine, BacktestConfig
+        import pandas as pd
+
+        # Helper function to extract indicators from signals
+        def extract_indicators_from_signals(signals):
+            """Extract indicator values from signals for chart plotting"""
+            if not signals or len(signals) == 0:
+                return None
+
+            # Get indicator names from the first signal
+            indicator_fields = []
+            first_signal = signals[0]
+            if hasattr(first_signal, 'indicators') and first_signal.indicators:
+                indicator_fields = list(first_signal.indicators.keys())
+
+            if not indicator_fields:
+                return None
+
+            result = {}
+            for field in indicator_fields:
+                values = []
+                for signal in signals:
+                    if hasattr(signal, 'indicators') and signal.indicators:
+                        value = signal.indicators.get(field)
+                        values.append(value)
+                    else:
+                        values.append(None)
+                result[field] = values
+
+            return result if result else None
+
+        # Helper function to get candles around a trade
+        def get_trade_candles(df, entry_date, exit_date, lookback_bars=50, lookforward_bars=10):
+            """Get candles around a trade for visualization"""
+            try:
+                # Find entry index
+                entry_idx = df[df['timestamp'] == entry_date].index[0] if len(df[df['timestamp'] == entry_date]) > 0 else None
+
+                if entry_idx is None:
+                    return []
+
+                # Get candles before entry for context
+                start_idx = max(0, entry_idx - lookback_bars)
+
+                # Get candles after exit for context
+                if exit_date:
+                    exit_idx = df[df['timestamp'] == exit_date].index[0] if len(df[df['timestamp'] == exit_date]) > 0 else entry_idx
+                    end_idx = min(len(df), exit_idx + lookforward_bars)
+                else:
+                    end_idx = min(len(df), entry_idx + lookforward_bars)
+
+                # Extract candles
+                trade_candles = df.iloc[start_idx:end_idx]
+
+                return [
+                    {
+                        "timestamp": str(row['timestamp']),
+                        "open": row['open'],
+                        "high": row['high'],
+                        "low": row['low'],
+                        "close": row['close'],
+                        "volume": row['volume']
+                    }
+                    for _, row in trade_candles.iterrows()
+                ]
+            except Exception as e:
+                print(f"Error getting trade candles: {e}")
+                return []
+
+        # Get stock
+        stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+        if not stock:
+            raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
+
+        # Get candles from backtest database
+        bt_db = db_manager.get_backtest_session()
+
+        tf_map = {"1m": TimeFrame.M1, "5m": TimeFrame.M5, "1h": TimeFrame.H1, "1d": TimeFrame.D1}
+        tf = tf_map.get(timeframe)
+        if not tf:
+            raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
+
+        # Fetch historical candles
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+
+        candles = (
+            bt_db.query(Candle)
+            .filter(
+                Candle.stock_id == stock.id,
+                Candle.timeframe == tf,
+                Candle.timestamp >= start_dt,
+                Candle.timestamp <= end_dt
+            )
+            .order_by(Candle.timestamp.asc())
+            .all()
+        )
+
+        if len(candles) < 50:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient historical data. Found {len(candles)} candles, need at least 50."
+            )
+
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            "timestamp": c.timestamp,
+            "open": c.open,
+            "high": c.high,
+            "low": c.low,
+            "close": c.close,
+            "volume": c.volume
+        } for c in candles])
+
+        # Parse strategy parameters if provided
+        import json
+        params = {}
+        if strategy_params:
+            try:
+                params = json.loads(strategy_params)
+            except json.JSONDecodeError:
+                pass
+
+        # Get strategy with custom parameters or settings from DB
+        if params:
+            # Instantiate strategy with custom parameters
+            from strategies import STRATEGIES
+
+            # Get strategy class (not instance)
+            strategy_class = STRATEGIES.get(strategy.upper())
+            if not strategy_class:
+                raise HTTPException(status_code=400, detail=f"Unknown strategy: {strategy}")
+
+            # Create strategy instance with custom params
+            if strategy == "MACD":
+                strat = strategy_class(
+                    fast_period=params.get('fast_period', 12),
+                    slow_period=params.get('slow_period', 26),
+                    signal_period=params.get('signal_period', 9)
+                )
+            elif strategy == "RSI":
+                strat = strategy_class(
+                    period=params.get('period', 14),
+                    oversold=params.get('oversold', 30),
+                    overbought=params.get('overbought', 70)
+                )
+            elif strategy == "RSI_W_PATTERN":
+                strat = strategy_class(
+                    rsi_period=params.get('rsi_period', 14),
+                    oversold_threshold=params.get('oversold_threshold', 30),
+                    overbought_threshold=params.get('overbought_threshold', 70),
+                    min_distance=params.get('min_distance', 3),
+                    max_distance=params.get('max_distance', 10),
+                    rsi_tolerance=params.get('rsi_tolerance', 5)
+                )
+            elif strategy == "MA_CROSSOVER":
+                strat = strategy_class(
+                    short_period=params.get('short_period', 20),
+                    long_period=params.get('long_period', 50),
+                    use_ema=params.get('use_ema', True)
+                )
+            elif strategy == "BOLLINGER":
+                strat = strategy_class(
+                    period=params.get('period', 20),
+                    std_dev=params.get('std_dev', 2.0)
+                )
+            else:
+                strat = strategy_class()
+        else:
+            # Use settings from database
+            strat = _get_strategy_with_settings(strategy, db)
+
+        # Calculate indicators for the FULL dataset for chart plotting
+        full_indicators_result = strat.calculate(df, full_history=True)
+        full_indicators = full_indicators_result.get('indicators', {}) if full_indicators_result else {}
+
+        # Generate signals for each candle
+        signals = []
+        for i in range(len(df)):
+            # Get data up to current point (avoid look-ahead bias)
+            df_subset = df.iloc[:i+1]
+            if len(df_subset) >= 50:  # Minimum data for signal
+                result = strat.calculate(df_subset)
+                signals.append(result)
+            else:
+                signals.append({"signal": "HOLD", "strength": 0})
+
+        # Run backtest
+        config = BacktestConfig(
+            symbol=symbol,
+            strategy_name=strategy,
+            timeframe=timeframe,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            position_size=position_size
+        )
+
+        # Count signals for diagnostics
+        buy_signals = sum(1 for s in signals if s.get('signal') == 'BUY')
+        sell_signals = sum(1 for s in signals if s.get('signal') == 'SELL')
+        hold_signals = sum(1 for s in signals if s.get('signal') == 'HOLD')
+
+        engine = BacktestEngine(config)
+        result = engine.run(df, signals)
+
+        # Helper function to safely convert float values (handle inf/nan)
+        import math
+        def safe_float(value, default=0.0):
+            if value is None or math.isnan(value) or math.isinf(value):
+                return default
+            return round(value, 2)
+
+        # Helper function to sanitize indicators dictionary (handle inf/nan in arrays)
+        def sanitize_indicators(indicators):
+            if not indicators:
+                return None
+            sanitized = {}
+            for key, value in indicators.items():
+                if isinstance(value, list):
+                    # Sanitize arrays
+                    sanitized[key] = [safe_float(v) if isinstance(v, (int, float)) else v for v in value]
+                elif isinstance(value, (int, float)):
+                    # Sanitize single values
+                    sanitized[key] = safe_float(value)
+                else:
+                    # Keep strings and other types as-is
+                    sanitized[key] = value
+            return sanitized
+
+        # Format response
+        return {
+            "config": {
+                "symbol": result.config.symbol,
+                "strategy": result.config.strategy_name,
+                "timeframe": result.config.timeframe,
+                "start_date": result.config.start_date,
+                "end_date": result.config.end_date,
+                "initial_capital": result.config.initial_capital
+            },
+            "diagnostics": {
+                "total_candles": len(candles),
+                "candles_analyzed": len(signals),
+                "buy_signals_found": buy_signals,
+                "sell_signals_found": sell_signals,
+                "hold_signals": hold_signals,
+                "data_range": {
+                    "start": str(df['timestamp'].min()),
+                    "end": str(df['timestamp'].max())
+                },
+                "opportunities_found": buy_signals + sell_signals > 0
+            },
+            "metrics": {
+                "total_return": safe_float(result.total_return),
+                "total_return_percent": safe_float(result.total_return_percent),
+                "max_drawdown": safe_float(result.max_drawdown),
+                "max_drawdown_percent": safe_float(result.max_drawdown_percent),
+                "sharpe_ratio": safe_float(result.sharpe_ratio),
+                "win_rate": safe_float(result.win_rate),
+                "profit_factor": safe_float(result.profit_factor),
+                "total_trades": result.total_trades,
+                "winning_trades": result.winning_trades,
+                "losing_trades": result.losing_trades,
+                "avg_win": safe_float(result.avg_win),
+                "avg_loss": safe_float(result.avg_loss),
+                "avg_trade": safe_float(result.avg_trade),
+                "best_trade": safe_float(result.best_trade),
+                "worst_trade": safe_float(result.worst_trade),
+                "avg_trade_duration_hours": safe_float(result.avg_trade_duration)
+            },
+            "equity_curve": [safe_float(e) for e in result.equity_curve],
+            "equity_dates": [str(d) for d in result.equity_dates],
+            "trades": [
+                {
+                    "entry_date": str(t.entry_date),
+                    "entry_price": safe_float(t.entry_price),
+                    "exit_date": str(t.exit_date) if t.exit_date else None,
+                    "exit_price": safe_float(t.exit_price) if t.exit_price else None,
+                    "quantity": t.quantity,
+                    "pnl": safe_float(t.pnl),
+                    "pnl_percent": safe_float(t.pnl_percent),
+                    "type": t.position_type.value,
+                    # Add candle data around trade for chart visualization
+                    "candles": get_trade_candles(df, t.entry_date, t.exit_date)
+                }
+                for t in result.trades
+            ][:50],  # Limit to 50 trades for response size
+            # Include strategy and signals for condition display
+            "strategy_config": strategy,
+            "all_candles": candles,  # Include all candles for continuous chart
+            "all_indicators": sanitize_indicators(full_indicators)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        bt_db.close()
+
+
+@app.get("/backtest/data-availability", tags=["Backtest"])
+def get_backtest_data_availability(symbol: str):
+    """Get available date range for backtesting a symbol"""
+    from database_manager import db_manager
+
+    bt_db = db_manager.get_backtest_session()
+
+    try:
+        stock = bt_db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+        if not stock:
+            return {"available": False, "message": f"Stock {symbol} not found"}
+
+        # Get earliest and latest candles for each timeframe
+        timeframes_data = {}
+
+        for tf_name, tf_enum in [("1m", TimeFrame.M1), ("5m", TimeFrame.M5),
+                                   ("1h", TimeFrame.H1), ("1d", TimeFrame.D1)]:
+            earliest = (
+                bt_db.query(Candle)
+                .filter(Candle.stock_id == stock.id, Candle.timeframe == tf_enum)
+                .order_by(Candle.timestamp.asc())
+                .first()
+            )
+
+            latest = (
+                bt_db.query(Candle)
+                .filter(Candle.stock_id == stock.id, Candle.timeframe == tf_enum)
+                .order_by(Candle.timestamp.desc())
+                .first()
+            )
+
+            count = (
+                bt_db.query(Candle)
+                .filter(Candle.stock_id == stock.id, Candle.timeframe == tf_enum)
+                .count()
+            )
+
+            if earliest and latest:
+                timeframes_data[tf_name] = {
+                    "start_date": str(earliest.timestamp.date()),
+                    "end_date": str(latest.timestamp.date()),
+                    "candle_count": count
+                }
+
+        return {
+            "available": len(timeframes_data) > 0,
+            "symbol": symbol,
+            "timeframes": timeframes_data
+        }
+
+    finally:
+        bt_db.close()
+
+
+@app.post("/backtest/load-data", tags=["Backtest"])
+def load_backtest_data(symbol: str, timeframe: str = "1d", period: str = "2y"):
+    """
+    Load historical data from Yahoo Finance into backtest database
+
+    Args:
+        symbol: Stock symbol
+        timeframe: Target timeframe (1m, 5m, 1h, 1d)
+        period: Period to fetch (1y, 2y, 5y, max)
+    """
+    try:
+        import yfinance as yf
+        from database_manager import db_manager
+        import time
+
+        # Map timeframes
+        tf_map = {
+            "1m": (TimeFrame.M1, "7d"),    # Yahoo limits
+            "5m": (TimeFrame.M5, "60d"),
+            "1h": (TimeFrame.H1, "730d"),
+            "1d": (TimeFrame.D1, period)
+        }
+
+        if timeframe not in tf_map:
+            raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
+
+        tf_enum, yahoo_period = tf_map[timeframe]
+
+        bt_db = db_manager.get_backtest_session()
+
+        try:
+            # Get or create stock
+            stock = bt_db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+            if not stock:
+                stock = Stock(symbol=symbol.upper(), name=symbol.upper())
+                bt_db.add(stock)
+                bt_db.commit()
+                bt_db.refresh(stock)
+
+            # Fetch from Yahoo Finance
+            ticker = yf.Ticker(symbol)
+
+            # Add delay to avoid rate limiting
+            time.sleep(1)
+
+            df = ticker.history(period=yahoo_period, interval=timeframe)
+
+            if df.empty:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No data available from Yahoo Finance for {symbol} ({timeframe})"
+                )
+
+            # Store candles
+            candles_added = 0
+            candles_updated = 0
+
+            for idx, row in df.iterrows():
+                existing = bt_db.query(Candle).filter(
+                    Candle.stock_id == stock.id,
+                    Candle.timestamp == idx.to_pydatetime(),
+                    Candle.timeframe == tf_enum
+                ).first()
+
+                if existing:
+                    existing.open = float(row['Open'])
+                    existing.high = float(row['High'])
+                    existing.low = float(row['Low'])
+                    existing.close = float(row['Close'])
+                    existing.volume = int(row['Volume'])
+                    candles_updated += 1
+                else:
+                    candle = Candle(
+                        stock_id=stock.id,
+                        timestamp=idx.to_pydatetime(),
+                        open=float(row['Open']),
+                        high=float(row['High']),
+                        low=float(row['Low']),
+                        close=float(row['Close']),
+                        volume=int(row['Volume']),
+                        timeframe=tf_enum
+                    )
+                    bt_db.add(candle)
+                    candles_added += 1
+
+            bt_db.commit()
+
+            return {
+                "success": True,
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "period": yahoo_period,
+                "candles_added": candles_added,
+                "candles_updated": candles_updated,
+                "total_candles": candles_added + candles_updated,
+                "date_range": {
+                    "start": str(df.index[0].date()),
+                    "end": str(df.index[-1].date())
+                }
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            bt_db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to load data: {str(e)}")
+        finally:
+            bt_db.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
