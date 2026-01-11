@@ -253,11 +253,14 @@ def sync_candles(
     full_sync: bool = False
 ) -> Dict:
     """
-    Sync candles from Yahoo Finance API to database
+    Sync candles from Yahoo Finance API or Binance to database
     Checks for existing candles before inserting to prevent duplicates
     Returns: dict with sync stats
     """
     symbol = symbol.upper().strip()
+
+    # Detect data source
+    data_source = "Binance" if is_crypto_symbol(symbol) else "Yahoo Finance"
 
     # Get or create stock
     stock = get_or_create_stock(db, symbol)
@@ -270,7 +273,7 @@ def sync_candles(
             # Start from latest + 1 second to avoid duplicates
             start_timestamp = int(latest_timestamp.timestamp()) + 1
 
-    # Fetch from Yahoo Finance API
+    # Fetch from appropriate data source (Binance for crypto, Yahoo for stocks)
     try:
         candles_data = fetch_candles_from_yahoo_api(symbol, timeframe, start_timestamp)
     except Exception as e:
@@ -278,7 +281,8 @@ def sync_candles(
             "success": False,
             "error": str(e),
             "symbol": symbol,
-            "timeframe": timeframe.value
+            "timeframe": timeframe.value,
+            "data_source": data_source
         }
 
     if not candles_data:
@@ -287,7 +291,8 @@ def sync_candles(
             "symbol": symbol,
             "timeframe": timeframe.value,
             "new_candles": 0,
-            "message": "No new candles available"
+            "message": "No new candles available",
+            "data_source": data_source
         }
 
     # Get all existing timestamps for this stock/timeframe to check duplicates
@@ -315,7 +320,8 @@ def sync_candles(
             "new_candles": 0,
             "skipped": skipped_count,
             "total_fetched": len(candles_data),
-            "message": "All candles already exist in database"
+            "message": "All candles already exist in database",
+            "data_source": data_source
         }
 
     # Bulk insert only new candles
@@ -343,7 +349,8 @@ def sync_candles(
         "new_candles": len(new_candles),
         "skipped": skipped_count,
         "total_fetched": len(candles_data),
-        "latest_timestamp": candles_data[-1]["timestamp"].isoformat() if candles_data else None
+        "latest_timestamp": candles_data[-1]["timestamp"].isoformat() if candles_data else None,
+        "data_source": data_source
     }
 
 

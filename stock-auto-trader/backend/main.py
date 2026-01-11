@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, Dict
 from datetime import datetime
 import os
+import logging
 
 from database import get_db, engine
 from models import Base, Stock, Candle, Trade, Portfolio, Holding, StrategySettings, TimeFrame, TradeType, StrategyType, IndicatorValue
@@ -25,6 +26,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Helper function to get timeframe mapping
+def get_timeframe_map():
+    """Returns a dict mapping timeframe strings to TimeFrame enum values"""
+    return {tf.value: tf for tf in TimeFrame}
 
 
 # ============ HEALTH CHECK ============
@@ -54,6 +60,26 @@ def add_stock(
 
     symbol = symbol.upper().strip()
 
+    # Normalize Binance-format symbols (BTCUSDT -> BTC, SOLUSDT -> SOL)
+    if symbol.endswith('USDT') and not symbol.startswith('^'):
+        # Convert Binance format to simple crypto symbol
+        normalized = symbol.replace('USDT', '')
+        if len(normalized) <= 6 and '.' not in normalized:
+            logger = logging.getLogger(__name__)
+            logger.info(f"📍 [ADD_STOCK] Normalizing Binance symbol {symbol} to {normalized}")
+            symbol = normalized
+
+    # Also handle Yahoo Finance crypto format (-USD suffix)
+    # Keep -USD for now as it's the standard Yahoo Finance format for crypto
+    # But remove it if user wants clean symbols
+    # Actually, let's normalize to clean symbols without -USD
+    if symbol.endswith('-USD') and not symbol.startswith('^'):
+        base = symbol.replace('-USD', '')
+        if len(base) <= 6 and '.' not in base:
+            logger = logging.getLogger(__name__)
+            logger.info(f"📍 [ADD_STOCK] Normalizing Yahoo crypto symbol {symbol} to {base}")
+            symbol = base
+
     # Check if exists
     existing = db.query(Stock).filter(Stock.symbol == symbol).first()
     if existing:
@@ -73,11 +99,7 @@ def add_stock(
         result["sync_results"] = sync_results
 
         # Calculate indicators for all timeframes
-        tf_map = {
-            "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
-            "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
-            "1d": TimeFrame.D1
-        }
+        tf_map = get_timeframe_map()
         for tf_name, tf in tf_map.items():
             calculate_indicators_for_candles(db, stock.id, tf)
 
@@ -206,11 +228,7 @@ def get_candles(
         raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
     
     # Map timeframe string to enum
-    tf_map = {
-        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
-        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
-        "1d": TimeFrame.D1
-    }
+    tf_map = get_timeframe_map()
     tf = tf_map.get(timeframe)
     if not tf:
         raise HTTPException(status_code=400, detail=f"Invalid timeframe. Use: 1m, 5m, 15m, 30m, 1h, 2h, 3h, 4h, 5h, 1d")
@@ -243,11 +261,7 @@ def get_latest_candle(symbol: str, timeframe: str = "1d", db: Session = Depends(
     if not stock:
         return {"latest_timestamp": None}
     
-    tf_map = {
-        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
-        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
-        "1d": TimeFrame.D1
-    }
+    tf_map = get_timeframe_map()
     tf = tf_map.get(timeframe)
 
     latest = (
@@ -274,35 +288,88 @@ def sync_stock_candles(
     - full_sync: if True, fetches all available history
     - Automatically calculates indicators after sync
     """
+    import logging
+    import yfinance as yf
+    from datetime import datetime
     from services.candle_service import sync_candles, sync_all_timeframes
     from services.indicator_service import calculate_indicators_for_candles
 
-    tf_map = {
-        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
-        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
-        "1d": TimeFrame.D1
-    }
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔄 [SYNC] Starting sync for {symbol.upper()}, timeframe={timeframe}, full_sync={full_sync}")
+
+    # Map string to TimeFrame enum
+    tf_map = get_timeframe_map()
 
     # Get stock_id for indicator calculation
     stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+    if not stock:
+        logger.error(f"❌ [SYNC] Stock {symbol.upper()} not found in database")
+        raise HTTPException(status_code=404, detail=f"Stock {symbol.upper()} not found. Please add it first.")
+
+    # Detect data source (Binance for crypto, Yahoo Finance for stocks)
+    from services.binance_service import is_crypto_symbol
+    is_crypto = is_crypto_symbol(symbol)
+    data_source = "Binance" if is_crypto else "Yahoo Finance"
+    exchange = "Binance" if is_crypto else "Yahoo Finance"
+    market_state = "24/7" if is_crypto else "Unknown"
+    is_market_open = True if is_crypto else None  # Crypto markets are always open
+    exchange_tz = "UTC"
+
+    # For stocks, try to get market info (optional, non-blocking)
+    if not is_crypto:
+        try:
+            ticker = yf.Ticker(symbol.upper())
+            info = ticker.fast_info if hasattr(ticker, 'fast_info') else {}
+
+            if not info:
+                info = ticker.info
+
+            exchange = info.get('exchange', 'Yahoo Finance')
+            market_state = info.get('marketState', 'Unknown')
+            is_market_open = market_state in ['REGULAR', 'PRE', 'POST']
+            exchange_tz = info.get('exchangeTimezoneName', 'UTC')
+
+            logger.info(f"📍 [SYNC] Stock Exchange: {exchange}, Market State: {market_state}, Open: {is_market_open}")
+        except Exception as e:
+            logger.debug(f"ℹ️ [SYNC] Could not fetch market info (non-critical): {str(e)[:100]}")
+            # Continue with defaults - market info is optional
+    else:
+        logger.info(f"📍 [SYNC] Crypto via Binance - Market: 24/7 Open")
 
     if timeframe:
         tf = tf_map.get(timeframe)
         if not tf:
+            logger.error(f"❌ [SYNC] Invalid timeframe: {timeframe}")
             raise HTTPException(status_code=400, detail="Invalid timeframe. Use: 1m, 5m, 15m, 30m, 1h, 2h, 3h, 4h, 5h, 1d")
+
+        logger.info(f"📊 [SYNC] Syncing {symbol.upper()} for timeframe {timeframe} (delta sync)")
         result = sync_candles(db, symbol, tf, full_sync)
+        logger.info(f"✅ [SYNC] Sync complete: {result.get('new_candles', 0)} new candles")
 
         # Calculate indicators after sync
-        if stock and result.get("new_candles", 0) > 0:
+        if result.get("new_candles", 0) > 0:
+            logger.info(f"📈 [SYNC] Calculating indicators for {symbol.upper()} {timeframe}")
             indicator_result = calculate_indicators_for_candles(db, stock.id, tf)
             result["indicators_calculated"] = indicator_result
+            logger.info(f"✅ [SYNC] Indicators calculated: {indicator_result}")
+
+        # Add market info
+        result["exchange"] = exchange
+        result["market_state"] = market_state
+        result["is_market_open"] = is_market_open
+        result["sync_type"] = "full" if full_sync else "delta"
 
         return result
     else:
+        logger.info(f"📊 [SYNC] Syncing {symbol.upper()} for all timeframes (delta sync)")
         results = sync_all_timeframes(db, symbol, full_sync)
+
+        total_new = sum(r.get("new_candles", 0) for r in results)
+        logger.info(f"✅ [SYNC] All timeframes synced: {total_new} total new candles")
 
         # Calculate indicators for all timeframes
         if stock:
+            logger.info(f"📈 [SYNC] Calculating indicators for all timeframes")
             for tf_name, tf in tf_map.items():
                 indicator_result = calculate_indicators_for_candles(db, stock.id, tf)
                 # Find matching result and add indicator info
@@ -310,7 +377,15 @@ def sync_stock_candles(
                     if r.get("timeframe") == tf_name:
                         r["indicators_calculated"] = indicator_result
 
-        return {"symbol": symbol.upper(), "results": results}
+        return {
+            "symbol": symbol.upper(),
+            "exchange": exchange,
+            "market_state": market_state,
+            "is_market_open": is_market_open,
+            "exchange_timezone": exchange_tz,
+            "sync_type": "full" if full_sync else "delta",
+            "results": results
+        }
 
 
 @app.get("/candles/{symbol}/sync-status", tags=["Candles"])
@@ -364,6 +439,400 @@ def get_trades(
         })
     
     return result
+
+
+# ============ MANUAL TRADING ============
+@app.post("/trades/manual/buy", tags=["Manual Trading"])
+def manual_buy(
+    symbol: str,
+    quantity: int,
+    price: Optional[float] = None,
+    db: Session = Depends(get_db)
+):
+    """Execute manual buy order"""
+    from utils.trading_fees import calculate_trading_fees
+
+    # Get stock
+    stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+    if not stock:
+        raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
+
+    # Get current price if not provided
+    if price is None:
+        latest_candle = (
+            db.query(Candle)
+            .filter(Candle.stock_id == stock.id, Candle.timeframe == TimeFrame.D1)
+            .order_by(Candle.timestamp.desc())
+            .first()
+        )
+        if not latest_candle:
+            raise HTTPException(status_code=400, detail="No price data available. Please provide price manually.")
+        price = latest_candle.close
+
+    # Calculate fees
+    fees = calculate_trading_fees(quantity, price, "BUY")
+
+    # Check portfolio balance
+    portfolio = db.query(Portfolio).first()
+    if not portfolio:
+        portfolio = Portfolio(cash_balance=10000.0, initial_capital=10000.0)
+        db.add(portfolio)
+        db.commit()
+        db.refresh(portfolio)
+
+    if portfolio.cash_balance < fees["net_amount"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient funds. Required: ₹{fees['net_amount']:.2f}, Available: ₹{portfolio.cash_balance:.2f}"
+        )
+
+    # Create trade record
+    trade = Trade(
+        stock_id=stock.id,
+        trade_type=TradeType.BUY,
+        strategy=StrategyType.MANUAL,
+        quantity=quantity,
+        price=price,
+        total_value=fees["net_amount"],
+        notes=f"Manual buy order. Charges: ₹{fees['total_charges']:.2f}"
+    )
+    db.add(trade)
+
+    # Update portfolio
+    portfolio.cash_balance -= fees["net_amount"]
+
+    # Update or create holding
+    holding = db.query(Holding).filter(Holding.stock_id == stock.id).first()
+    if holding:
+        # Update average buy price
+        total_qty = holding.quantity + quantity
+        total_cost = (holding.avg_buy_price * holding.quantity) + fees["net_amount"]
+        holding.avg_buy_price = total_cost / total_qty
+        holding.quantity = total_qty
+    else:
+        holding = Holding(
+            stock_id=stock.id,
+            quantity=quantity,
+            avg_buy_price=fees["net_amount"] / quantity
+        )
+        db.add(holding)
+
+    db.commit()
+    db.refresh(trade)
+
+    return {
+        "message": "Buy order executed successfully",
+        "trade_id": trade.id,
+        "symbol": symbol.upper(),
+        "quantity": quantity,
+        "price": price,
+        "fees": fees,
+        "remaining_balance": round(portfolio.cash_balance, 2)
+    }
+
+
+@app.post("/trades/manual/sell", tags=["Manual Trading"])
+def manual_sell(
+    symbol: str,
+    quantity: int,
+    price: Optional[float] = None,
+    db: Session = Depends(get_db)
+):
+    """Execute manual sell order"""
+    from utils.trading_fees import calculate_trading_fees
+
+    # Get stock
+    stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+    if not stock:
+        raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
+
+    # Check holding
+    holding = db.query(Holding).filter(Holding.stock_id == stock.id).first()
+    if not holding or holding.quantity < quantity:
+        available_qty = holding.quantity if holding else 0
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient shares. Available: {available_qty}, Requested: {quantity}"
+        )
+
+    # Get current price if not provided
+    if price is None:
+        latest_candle = (
+            db.query(Candle)
+            .filter(Candle.stock_id == stock.id, Candle.timeframe == TimeFrame.D1)
+            .order_by(Candle.timestamp.desc())
+            .first()
+        )
+        if not latest_candle:
+            raise HTTPException(status_code=400, detail="No price data available. Please provide price manually.")
+        price = latest_candle.close
+
+    # Calculate fees
+    fees = calculate_trading_fees(quantity, price, "SELL")
+
+    # Create trade record
+    trade = Trade(
+        stock_id=stock.id,
+        trade_type=TradeType.SELL,
+        strategy=StrategyType.MANUAL,
+        quantity=quantity,
+        price=price,
+        total_value=fees["net_amount"],
+        notes=f"Manual sell order. Charges: ₹{fees['total_charges']:.2f}"
+    )
+    db.add(trade)
+
+    # Update portfolio
+    portfolio = db.query(Portfolio).first()
+    portfolio.cash_balance += fees["net_amount"]
+
+    # Update holding
+    holding.quantity -= quantity
+    if holding.quantity == 0:
+        db.delete(holding)
+
+    db.commit()
+    db.refresh(trade)
+
+    return {
+        "message": "Sell order executed successfully",
+        "trade_id": trade.id,
+        "symbol": symbol.upper(),
+        "quantity": quantity,
+        "price": price,
+        "fees": fees,
+        "new_balance": round(portfolio.cash_balance, 2)
+    }
+
+
+@app.get("/trades/manual/positions", tags=["Manual Trading"])
+def get_manual_positions(
+    symbol: Optional[str] = None,
+    limit: int = Query(default=10, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """Get open positions from manual trades with P&L"""
+
+    # Get holdings
+    holdings_query = db.query(Holding).filter(Holding.quantity > 0)
+    if symbol:
+        stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+        if stock:
+            holdings_query = holdings_query.filter(Holding.stock_id == stock.id)
+
+    holdings = holdings_query.all()
+
+    positions = []
+    total_invested = 0
+    total_current_value = 0
+
+    for holding in holdings:
+        stock = db.query(Stock).filter(Stock.id == holding.stock_id).first()
+        if not stock:
+            continue
+
+        # Get current price
+        latest_candle = (
+            db.query(Candle)
+            .filter(Candle.stock_id == stock.id, Candle.timeframe == TimeFrame.D1)
+            .order_by(Candle.timestamp.desc())
+            .first()
+        )
+        current_price = latest_candle.close if latest_candle else holding.avg_buy_price
+
+        # Calculate P&L
+        invested = holding.avg_buy_price * holding.quantity
+        current_value = current_price * holding.quantity
+        pnl = current_value - invested
+        pnl_percent = (pnl / invested) * 100 if invested > 0 else 0
+
+        total_invested += invested
+        total_current_value += current_value
+
+        # Get buy trades for this stock (FIFO order)
+        buy_trades = (
+            db.query(Trade)
+            .filter(
+                Trade.stock_id == stock.id,
+                Trade.trade_type == TradeType.BUY,
+                Trade.strategy == StrategyType.MANUAL
+            )
+            .order_by(Trade.timestamp.asc())
+            .all()
+        )
+
+        positions.append({
+            "symbol": stock.symbol,
+            "name": stock.name,
+            "quantity": holding.quantity,
+            "avg_buy_price": round(holding.avg_buy_price, 2),
+            "current_price": round(current_price, 2),
+            "invested": round(invested, 2),
+            "current_value": round(current_value, 2),
+            "pnl": round(pnl, 2),
+            "pnl_percent": round(pnl_percent, 2),
+            "buy_trades_count": len(buy_trades)
+        })
+
+    # Apply pagination
+    total_positions = len(positions)
+    positions = positions[offset:offset + limit]
+
+    overall_pnl = total_current_value - total_invested
+    overall_pnl_percent = (overall_pnl / total_invested) * 100 if total_invested > 0 else 0
+
+    return {
+        "positions": positions,
+        "summary": {
+            "total_positions": total_positions,
+            "total_invested": round(total_invested, 2),
+            "total_current_value": round(total_current_value, 2),
+            "total_pnl": round(overall_pnl, 2),
+            "total_pnl_percent": round(overall_pnl_percent, 2)
+        },
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total": total_positions
+        }
+    }
+
+
+@app.get("/trades/manual/history", tags=["Manual Trading"])
+def get_manual_trade_history(
+    symbol: Optional[str] = None,
+    trade_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: int = Query(default=10, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """Get manual trade history with filters"""
+    from datetime import datetime as dt
+
+    # Build query
+    query = db.query(Trade).filter(Trade.strategy == StrategyType.MANUAL)
+
+    if symbol:
+        stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+        if stock:
+            query = query.filter(Trade.stock_id == stock.id)
+
+    if trade_type:
+        try:
+            tt = TradeType(trade_type.upper())
+            query = query.filter(Trade.trade_type == tt)
+        except ValueError:
+            pass
+
+    if date_from:
+        try:
+            from_date = dt.fromisoformat(date_from)
+            query = query.filter(Trade.timestamp >= from_date)
+        except ValueError:
+            pass
+
+    if date_to:
+        try:
+            to_date = dt.fromisoformat(date_to)
+            query = query.filter(Trade.timestamp <= to_date)
+        except ValueError:
+            pass
+
+    # Get total count
+    total_count = query.count()
+
+    # Apply pagination and ordering
+    trades = query.order_by(Trade.timestamp.desc()).offset(offset).limit(limit).all()
+
+    result = []
+    for trade in trades:
+        stock = db.query(Stock).filter(Stock.id == trade.stock_id).first()
+        result.append({
+            "id": trade.id,
+            "symbol": stock.symbol if stock else "Unknown",
+            "name": stock.name if stock else "Unknown",
+            "type": trade.trade_type.value,
+            "quantity": trade.quantity,
+            "price": round(trade.price, 2),
+            "total_value": round(trade.total_value, 2),
+            "timestamp": trade.timestamp.isoformat(),
+            "notes": trade.notes
+        })
+
+    return {
+        "trades": result,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total": total_count
+        }
+    }
+
+
+@app.get("/trades/manual/calculate-fees", tags=["Manual Trading"])
+def calculate_fees_preview(
+    symbol: str,
+    quantity: int,
+    price: Optional[float] = None,
+    trade_type: str = "BUY",
+    fund_percentage: Optional[float] = None,
+    db: Session = Depends(get_db)
+):
+    """Calculate trading fees and max quantity before executing trade"""
+    from utils.trading_fees import calculate_trading_fees, calculate_max_quantity
+
+    # Get stock
+    stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+    if not stock:
+        raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
+
+    # Get current price if not provided
+    if price is None:
+        latest_candle = (
+            db.query(Candle)
+            .filter(Candle.stock_id == stock.id, Candle.timeframe == TimeFrame.D1)
+            .order_by(Candle.timestamp.desc())
+            .first()
+        )
+        if not latest_candle:
+            raise HTTPException(status_code=400, detail="No price data available")
+        price = latest_candle.close
+
+    # Get portfolio
+    portfolio = db.query(Portfolio).first()
+    available_funds = portfolio.cash_balance if portfolio else 0
+
+    # Calculate fees for requested quantity
+    fees = calculate_trading_fees(quantity, price, trade_type.upper())
+
+    # Calculate max quantity if fund percentage is provided
+    max_qty_info = None
+    if trade_type.upper() == "BUY" and fund_percentage is not None:
+        max_qty_info = calculate_max_quantity(available_funds, price, fund_percentage)
+
+    # Get current holding for sell validation
+    holding_qty = 0
+    if trade_type.upper() == "SELL":
+        holding = db.query(Holding).filter(Holding.stock_id == stock.id).first()
+        holding_qty = holding.quantity if holding else 0
+
+    return {
+        "symbol": symbol.upper(),
+        "current_price": round(price, 2),
+        "quantity": quantity,
+        "trade_type": trade_type.upper(),
+        "fees": fees,
+        "available_funds": round(available_funds, 2),
+        "max_quantity_info": max_qty_info,
+        "holding_quantity": holding_qty,
+        "can_execute": (
+            fees["net_amount"] <= available_funds if trade_type.upper() == "BUY"
+            else quantity <= holding_qty
+        )
+    }
 
 
 # ============ SIGNALS ============
@@ -653,62 +1122,7 @@ def _get_mtf_candle_data(db: Session, stock_id: int) -> Dict:
     """Fetch candle data for all 10 timeframes for MTF_EMA strategy"""
     import pandas as pd
 
-    tf_map = {
-        "1m": TimeFrame.M1,
-        "5m": TimeFrame.M5,
-        "15m": TimeFrame.M15,
-        "30m": TimeFrame.M30,
-        "1h": TimeFrame.H1,
-        "2h": TimeFrame.H2,
-        "3h": TimeFrame.H3,
-        "4h": TimeFrame.H4,
-        "5h": TimeFrame.H5,
-        "1D": TimeFrame.D1
-    }
-
-    mtf_data = {}
-    for tf_name, tf_enum in tf_map.items():
-        candles = (
-            db.query(Candle)
-            .filter(Candle.stock_id == stock_id, Candle.timeframe == tf_enum)
-            .order_by(Candle.timestamp.asc())
-            .all()
-        )
-
-        if len(candles) >= 305:  # Need enough for EMA 300
-            df = pd.DataFrame([{
-                "timestamp": c.timestamp,
-                "close": c.close
-            } for c in candles])
-            mtf_data[tf_name] = df
-
-    return mtf_data
-
-
-@app.get("/signals/{symbol}", tags=["Signals"])
-def get_signals(
-    symbol: str,
-    timeframe: str = "1d",
-    strategy: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
-    """
-    Get trading signals for a stock
-    - strategy: MACD, RSI, MA_CROSSOVER, BOLLINGER (if not provided, returns all)
-    """
-    from strategies import STRATEGIES
-    import pandas as pd
-
-    # Get candles
-    stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
-    if not stock:
-        raise HTTPException(status_code=404, detail=f"Stock {symbol} not found. Sync it first.")
-
-    tf_map = {
-        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
-        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
-        "1d": TimeFrame.D1
-    }
+    tf_map = get_timeframe_map()
     tf = tf_map.get(timeframe)
     if not tf:
         raise HTTPException(status_code=400, detail="Invalid timeframe. Use: 1m, 5m, 15m, 30m, 1h, 2h, 3h, 4h, 5h, 1d")
@@ -827,11 +1241,7 @@ def get_stored_indicators(
     if not stock:
         raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
 
-    tf_map = {
-        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
-        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
-        "1d": TimeFrame.D1
-    }
+    tf_map = get_timeframe_map()
     tf = tf_map.get(timeframe)
     if not tf:
         raise HTTPException(status_code=400, detail="Invalid timeframe")
@@ -867,11 +1277,7 @@ def get_signals_fast(
     if not stock:
         raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
 
-    tf_map = {
-        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
-        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
-        "1d": TimeFrame.D1
-    }
+    tf_map = get_timeframe_map()
     tf = tf_map.get(timeframe)
     if not tf:
         raise HTTPException(status_code=400, detail="Invalid timeframe")

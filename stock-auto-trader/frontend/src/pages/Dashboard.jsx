@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
 import { RefreshCw, DollarSign, TrendingUp, ChevronDown } from 'lucide-react';
+import toast, { Toaster } from 'react-hot-toast';
 import Sidebar from '../components/Sidebar';
 import StrategyCard from '../components/StrategyCard';
 import SignalsTable from '../components/SignalsTable';
+import ManualTradingCard from '../components/ManualTradingCard';
+import SyncModal from '../components/SyncModal';
 import { stocksAPI, portfolioAPI, candlesAPI, signalsAPI, tradesAPI } from '../services/api';
 import './Dashboard.css';
 
@@ -20,10 +23,22 @@ const Dashboard = () => {
   const [error, setError] = useState(null);
   const [globalTimeframe, setGlobalTimeframe] = useState('1d');
   const [timeframeDropdownOpen, setTimeframeDropdownOpen] = useState(false);
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [syncStatus, setSyncStatus] = useState({
+    stage: 'fetching',
+    message: '',
+    progress: 0,
+    error: false,
+    success: false,
+    details: [],
+    exchange: null,
+    marketState: null,
+    isMarketOpen: null,
+    syncType: null
+  });
 
   // Fetch initial data
-  useEffect(() => {
-    const fetchInitialData = async () => {
+  const fetchInitialData = async () => {
       try {
         setLoading(true);
         console.log('🚀 Fetching initial data...');
@@ -61,14 +76,13 @@ const Dashboard = () => {
       }
     };
 
+  useEffect(() => {
     fetchInitialData();
   }, []);
 
   // Fetch stock data when selected stock changes
-  useEffect(() => {
+  const fetchStockData = async () => {
     if (!selectedStock) return;
-
-    const fetchStockData = async () => {
       try {
         console.log(`📊 Fetching data for ${selectedStock}...`);
 
@@ -98,27 +112,124 @@ const Dashboard = () => {
       }
     };
 
+  useEffect(() => {
     fetchStockData();
   }, [selectedStock]);
 
   const handleSyncCandles = async () => {
-    if (!selectedStock) return;
+    if (!selectedStock) {
+      toast.error('No stock selected');
+      return;
+    }
 
     try {
       setSyncing(true);
-      await candlesAPI.sync(selectedStock, null, false);
+      setSyncModalOpen(true);
 
-      // Refetch candles and signals
+      // Stage 1: Fetching Data
+      setSyncStatus({
+        stage: 'fetching',
+        message: `Downloading candles for ${selectedStock}...`,
+        progress: 20,
+        error: false,
+        success: false,
+        details: [],
+        exchange: null,
+        marketState: null,
+        isMarketOpen: null,
+        syncType: 'delta'
+      });
+
+      console.log(`🔄 [SYNC] Starting sync for ${selectedStock}...`);
+
+      // Sync candles from data source
+      const syncResponse = await candlesAPI.sync(selectedStock, null, false);
+      console.log(`✅ [SYNC] Sync response:`, syncResponse.data);
+
+      // Extract market info
+      const exchange = syncResponse.data?.exchange || 'Yahoo Finance';
+      const marketState = syncResponse.data?.market_state || 'Unknown';
+      const isMarketOpen = syncResponse.data?.is_market_open;
+      const syncType = syncResponse.data?.sync_type || 'delta';
+
+      console.log(`📍 [SYNC] Exchange: ${exchange}, Market: ${marketState}, Open: ${isMarketOpen}`);
+
+      // Check if any new candles were added
+      const newCandles = syncResponse.data?.results?.reduce((total, r) => total + (r.new_candles || 0), 0) || 0;
+      console.log(`📊 [SYNC] New candles synced: ${newCandles}`);
+
+      // Format details for display
+      const details = syncResponse.data?.results?.map(r => ({
+        timeframe: r.timeframe,
+        new_candles: r.new_candles || 0
+      })) || [];
+
+      // Stage 2: Calculating Indicators
+      setSyncStatus({
+        stage: 'calculating',
+        message: 'Processing technical indicators...',
+        progress: 60,
+        error: false,
+        success: false,
+        details,
+        exchange,
+        marketState,
+        isMarketOpen,
+        syncType
+      });
+
+      // Refetch candles
+      console.log(`📈 [SYNC] Fetching candles for ${selectedStock}...`);
       const candlesRes = await candlesAPI.get(selectedStock, '1d', 100);
+      console.log(`✅ [SYNC] Fetched ${candlesRes.data.length} candles`);
       setCandles(candlesRes.data);
 
+      // Refetch signals
+      console.log(`🎯 [SYNC] Fetching signals for ${selectedStock}...`);
       const signalsRes = await signalsAPI.get(selectedStock, '1d');
+      console.log(`✅ [SYNC] Fetched signals:`, signalsRes.data);
       setSignals(signalsRes.data.signals || []);
 
+      // Stage 3: Complete
+      const successMessage = newCandles > 0
+        ? `Synced ${newCandles} new candles for ${selectedStock}`
+        : `${selectedStock} is up to date`;
+
+      setSyncStatus({
+        stage: 'done',
+        message: successMessage,
+        progress: 100,
+        error: false,
+        success: true,
+        details,
+        exchange,
+        marketState,
+        isMarketOpen,
+        syncType
+      });
+
       setSyncing(false);
+
     } catch (error) {
-      console.error('Error syncing candles:', error);
+      console.error('❌ [SYNC] Error syncing candles:', error);
+      console.error('❌ [SYNC] Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+
       setSyncing(false);
+
+      // Show error in modal
+      const errorMsg = error.response?.data?.detail || error.message || 'Failed to sync data';
+      setSyncStatus({
+        stage: 'fetching',
+        message: errorMsg,
+        progress: 0,
+        error: true,
+        success: false,
+        details: []
+      });
     }
   };
 
@@ -187,6 +298,36 @@ const Dashboard = () => {
 
   return (
     <div className="dashboard-container">
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 3000,
+          style: {
+            background: 'var(--bg-card)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)',
+            fontFamily: 'Space Grotesk, sans-serif',
+          },
+          success: {
+            iconTheme: {
+              primary: 'var(--accent-green)',
+              secondary: 'white',
+            },
+          },
+          error: {
+            iconTheme: {
+              primary: 'var(--accent-red)',
+              secondary: 'white',
+            },
+          },
+        }}
+      />
+      <SyncModal
+        symbol={selectedStock}
+        isOpen={syncModalOpen}
+        onClose={() => setSyncModalOpen(false)}
+        syncStatus={syncStatus}
+      />
       <Sidebar
         stocks={stocks}
         selectedStock={selectedStock}
@@ -228,6 +369,16 @@ const Dashboard = () => {
             </button>
           </div>
         </div>
+
+        {/* Manual Trading Card */}
+        <ManualTradingCard
+          selectedStock={selectedStock}
+          currentPrice={candles.length > 0 ? candles[candles.length - 1]?.close : null}
+          onRefresh={() => {
+            fetchStockData();
+            fetchInitialData();
+          }}
+        />
 
         <div className="strategies-header">
           <h2>STRATEGIES</h2>

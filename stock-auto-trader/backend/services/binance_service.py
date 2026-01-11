@@ -72,28 +72,52 @@ BINANCE_API_URL = "https://api.binance.com/api/v3"
 def is_crypto_symbol(symbol: str) -> bool:
     """Check if a symbol is a cryptocurrency (should use Binance)"""
     symbol = symbol.upper().strip()
-    # Check if it's in our known crypto map
+
+    # Check if it's in our known crypto map (with -USD suffix)
     if symbol in CRYPTO_SYMBOL_MAP:
         return True
+
+    # Check if adding -USD makes it a known crypto
+    if f"{symbol}-USD" in CRYPTO_SYMBOL_MAP:
+        return True
+
     # Check if it ends with -USD (common crypto format on Yahoo)
     if symbol.endswith("-USD") and not symbol.startswith("^"):
         # Additional check: crypto symbols typically don't have dots
         base = symbol.replace("-USD", "")
         if "." not in base and len(base) <= 6:
             return True
+
+    # Common crypto symbols without -USD suffix
+    common_crypto = ["BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "DOT", "MATIC",
+                     "LINK", "AVAX", "SHIB", "LTC", "UNI", "ATOM", "XLM",
+                     "ALGO", "VET", "FIL", "TRX", "ETC", "NEAR", "FTM",
+                     "SAND", "MANA", "AXS", "AAVE", "GRT", "THETA", "XTZ", "EOS"]
+    if symbol in common_crypto:
+        return True
+
     return False
 
 
 def get_binance_symbol(yahoo_symbol: str) -> str:
     """Convert Yahoo Finance symbol to Binance symbol"""
     yahoo_symbol = yahoo_symbol.upper().strip()
+
+    # Check direct mapping
     if yahoo_symbol in CRYPTO_SYMBOL_MAP:
         return CRYPTO_SYMBOL_MAP[yahoo_symbol]
+
+    # Check if adding -USD gives us a mapping
+    if f"{yahoo_symbol}-USD" in CRYPTO_SYMBOL_MAP:
+        return CRYPTO_SYMBOL_MAP[f"{yahoo_symbol}-USD"]
+
     # Try to convert -USD to USDT format
     if yahoo_symbol.endswith("-USD"):
         base = yahoo_symbol.replace("-USD", "")
         return f"{base}USDT"
-    return yahoo_symbol
+
+    # If no -USD suffix, add USDT
+    return f"{yahoo_symbol}USDT"
 
 
 def fetch_binance_candles(

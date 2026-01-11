@@ -34,6 +34,7 @@ class StrategyType(enum.Enum):
     MA_CROSSOVER = "MA_CROSSOVER"
     BOLLINGER = "BOLLINGER"
     MTF_EMA = "MTF_EMA"
+    MANUAL = "MANUAL"
 
 
 # ============ STOCKS TABLE ============

@@ -37,9 +37,9 @@ export const candlesAPI = {
 
 // Signals API
 export const signalsAPI = {
+  // Use fast version by default (uses stored indicator values, faster)
   get: (symbol, timeframe = '1d', strategy = null) =>
-    api.get(`/signals/${symbol}`, { params: { timeframe, strategy } }),
-  // Fast version using stored indicator values (no recalculation)
+    api.get(`/signals-fast/${symbol}`, { params: { timeframe, strategy } }),
   getFast: (symbol, timeframe = '1d', strategy = null) =>
     api.get(`/signals-fast/${symbol}`, { params: { timeframe, strategy } }),
   getStrategies: () => api.get('/strategies'),
