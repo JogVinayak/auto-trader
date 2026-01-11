@@ -6,7 +6,7 @@ from datetime import datetime
 import os
 
 from database import get_db, engine
-from models import Base, Stock, Candle, Trade, Portfolio, Holding, StrategySettings, TimeFrame, TradeType, StrategyType
+from models import Base, Stock, Candle, Trade, Portfolio, Holding, StrategySettings, TimeFrame, TradeType, StrategyType, IndicatorValue
 
 # Create tables on startup
 Base.metadata.create_all(bind=engine)
@@ -42,33 +42,88 @@ def get_stocks(db: Session = Depends(get_db)):
 
 
 @app.post("/stocks", tags=["Stocks"])
-def add_stock(symbol: str, name: Optional[str] = None, db: Session = Depends(get_db)):
-    """Add a new stock to track"""
+def add_stock(
+    symbol: str,
+    name: Optional[str] = None,
+    auto_sync: bool = True,
+    db: Session = Depends(get_db)
+):
+    """Add a new stock to track and optionally sync candle data"""
+    from services.candle_service import sync_all_timeframes, get_or_create_stock
+    from services.indicator_service import calculate_indicators_for_candles
+
     symbol = symbol.upper().strip()
-    
+
     # Check if exists
     existing = db.query(Stock).filter(Stock.symbol == symbol).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"Stock {symbol} already exists")
-    
-    stock = Stock(symbol=symbol, name=name or symbol)
-    db.add(stock)
-    db.commit()
-    db.refresh(stock)
-    
-    return {"id": stock.id, "symbol": stock.symbol, "name": stock.name}
+
+    # Use get_or_create_stock to fetch name from Yahoo/Binance if not provided
+    stock = get_or_create_stock(db, symbol)
+    if name:
+        stock.name = name
+        db.commit()
+
+    result = {"id": stock.id, "symbol": stock.symbol, "name": stock.name}
+
+    # Auto sync candle data
+    if auto_sync:
+        sync_results = sync_all_timeframes(db, symbol, full_sync=False)
+        result["sync_results"] = sync_results
+
+        # Calculate indicators for all timeframes
+        tf_map = {
+            "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
+            "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
+            "1d": TimeFrame.D1
+        }
+        for tf_name, tf in tf_map.items():
+            calculate_indicators_for_candles(db, stock.id, tf)
+
+    return result
 
 
 @app.delete("/stocks/{symbol}", tags=["Stocks"])
 def delete_stock(symbol: str, db: Session = Depends(get_db)):
-    """Remove a stock from tracking"""
+    """Remove a stock and all its related data (candles, indicators, trades, holdings)"""
+    from sqlalchemy import text
+
     stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
     if not stock:
         raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
-    
+
+    stock_id = stock.id
+
+    # Delete in order to respect foreign key constraints
+    # 1. Delete indicator_values (references candles)
+    deleted_indicators = db.execute(
+        text("DELETE FROM indicator_values WHERE candle_id IN (SELECT id FROM candles WHERE stock_id = :stock_id)"),
+        {"stock_id": stock_id}
+    ).rowcount
+
+    # 2. Delete candles
+    deleted_candles = db.query(Candle).filter(Candle.stock_id == stock_id).delete()
+
+    # 3. Delete trades for this stock
+    deleted_trades = db.query(Trade).filter(Trade.stock_id == stock_id).delete()
+
+    # 4. Delete holdings for this stock
+    deleted_holdings = db.query(Holding).filter(Holding.stock_id == stock_id).delete()
+
+    # 5. Finally delete the stock
     db.delete(stock)
     db.commit()
-    return {"message": f"Stock {symbol} deleted"}
+
+    return {
+        "message": f"Stock {symbol} and all related data deleted",
+        "deleted": {
+            "indicator_values": deleted_indicators,
+            "candles": deleted_candles,
+            "trades": deleted_trades,
+            "holdings": deleted_holdings
+        }
+    }
 
 
 # ============ PORTFOLIO ============
@@ -357,6 +412,243 @@ def _get_strategy_with_settings(strategy_name: str, db: Session):
     return strategy_class()
 
 
+def _get_stored_indicator_values(db: Session, stock_id: int, timeframe: TimeFrame, strategy: str = None, limit: int = 500) -> Dict:
+    """
+    Fetch stored indicator values from database instead of recalculating.
+    Returns indicator data for chart rendering.
+    """
+    from sqlalchemy import desc
+
+    # Get candles with their indicator values
+    candles_query = (
+        db.query(Candle)
+        .filter(Candle.stock_id == stock_id, Candle.timeframe == timeframe)
+        .order_by(desc(Candle.timestamp))
+        .limit(limit)
+    )
+    candles = candles_query.all()
+
+    if not candles:
+        return {}
+
+    # Get candle IDs
+    candle_ids = [c.id for c in candles]
+
+    # Fetch indicator values for these candles
+    indicator_query = db.query(IndicatorValue).filter(IndicatorValue.candle_id.in_(candle_ids))
+    if strategy:
+        indicator_query = indicator_query.filter(IndicatorValue.strategy == strategy.upper())
+    indicators = indicator_query.all()
+
+    # Build lookup map: candle_id -> {strategy -> indicator_data}
+    indicator_map = {}
+    for ind in indicators:
+        if ind.candle_id not in indicator_map:
+            indicator_map[ind.candle_id] = {}
+        indicator_map[ind.candle_id][ind.strategy] = ind
+
+    # Build result with candles and their indicators (in chronological order)
+    result = {
+        "candles": [],
+        "indicators": {}
+    }
+
+    # Initialize indicator arrays for each strategy
+    strategies = set(ind.strategy for ind in indicators)
+    for strat in strategies:
+        result["indicators"][strat] = {
+            "signal": [],
+            "strength": [],
+            "timestamps": []
+        }
+        # Add strategy-specific fields
+        if strat == "MACD":
+            result["indicators"][strat].update({
+                "macd_line": [],
+                "macd_signal": [],
+                "macd_histogram": []
+            })
+        elif strat == "RSI":
+            result["indicators"][strat]["rsi_value"] = []
+        elif strat == "MA_CROSSOVER":
+            result["indicators"][strat].update({
+                "short_ma": [],
+                "long_ma": []
+            })
+        elif strat == "BOLLINGER":
+            result["indicators"][strat].update({
+                "bb_upper": [],
+                "bb_middle": [],
+                "bb_lower": [],
+                "bb_percent_b": []
+            })
+        elif strat == "MTF_EMA":
+            result["indicators"][strat].update({
+                "ema_20": [],
+                "ema_30": [],
+                "ema_40": [],
+                "ema_50": [],
+                "ema_60": [],
+                "ema_200": [],
+                "ema_300": [],
+                "bullish_count": [],
+                "bearish_count": []
+            })
+
+    # Populate data in chronological order (reverse the desc order)
+    for candle in reversed(candles):
+        result["candles"].append({
+            "timestamp": candle.timestamp.isoformat(),
+            "open": candle.open,
+            "high": candle.high,
+            "low": candle.low,
+            "close": candle.close,
+            "volume": candle.volume
+        })
+
+        candle_indicators = indicator_map.get(candle.id, {})
+
+        for strat in strategies:
+            ind = candle_indicators.get(strat)
+            ts = candle.timestamp.isoformat()
+
+            if ind:
+                result["indicators"][strat]["signal"].append(ind.signal)
+                result["indicators"][strat]["strength"].append(ind.strength)
+                result["indicators"][strat]["timestamps"].append(ts)
+
+                if strat == "MACD":
+                    result["indicators"][strat]["macd_line"].append(ind.macd_line)
+                    result["indicators"][strat]["macd_signal"].append(ind.macd_signal)
+                    result["indicators"][strat]["macd_histogram"].append(ind.macd_histogram)
+                elif strat == "RSI":
+                    result["indicators"][strat]["rsi_value"].append(ind.rsi_value)
+                elif strat == "MA_CROSSOVER":
+                    result["indicators"][strat]["short_ma"].append(ind.short_ma)
+                    result["indicators"][strat]["long_ma"].append(ind.long_ma)
+                elif strat == "BOLLINGER":
+                    result["indicators"][strat]["bb_upper"].append(ind.bb_upper)
+                    result["indicators"][strat]["bb_middle"].append(ind.bb_middle)
+                    result["indicators"][strat]["bb_lower"].append(ind.bb_lower)
+                    result["indicators"][strat]["bb_percent_b"].append(ind.bb_percent_b)
+                elif strat == "MTF_EMA":
+                    result["indicators"][strat]["ema_20"].append(ind.ema_20)
+                    result["indicators"][strat]["ema_30"].append(ind.ema_30)
+                    result["indicators"][strat]["ema_40"].append(ind.ema_40)
+                    result["indicators"][strat]["ema_50"].append(ind.ema_50)
+                    result["indicators"][strat]["ema_60"].append(ind.ema_60)
+                    result["indicators"][strat]["ema_200"].append(ind.ema_200)
+                    result["indicators"][strat]["ema_300"].append(ind.ema_300)
+                    result["indicators"][strat]["bullish_count"].append(ind.bullish_count)
+                    result["indicators"][strat]["bearish_count"].append(ind.bearish_count)
+            else:
+                # No indicator value for this candle, append None
+                result["indicators"][strat]["signal"].append(None)
+                result["indicators"][strat]["strength"].append(None)
+                result["indicators"][strat]["timestamps"].append(ts)
+
+                if strat == "MACD":
+                    result["indicators"][strat]["macd_line"].append(None)
+                    result["indicators"][strat]["macd_signal"].append(None)
+                    result["indicators"][strat]["macd_histogram"].append(None)
+                elif strat == "RSI":
+                    result["indicators"][strat]["rsi_value"].append(None)
+                elif strat == "MA_CROSSOVER":
+                    result["indicators"][strat]["short_ma"].append(None)
+                    result["indicators"][strat]["long_ma"].append(None)
+                elif strat == "BOLLINGER":
+                    result["indicators"][strat]["bb_upper"].append(None)
+                    result["indicators"][strat]["bb_middle"].append(None)
+                    result["indicators"][strat]["bb_lower"].append(None)
+                    result["indicators"][strat]["bb_percent_b"].append(None)
+                elif strat == "MTF_EMA":
+                    result["indicators"][strat]["ema_20"].append(None)
+                    result["indicators"][strat]["ema_30"].append(None)
+                    result["indicators"][strat]["ema_40"].append(None)
+                    result["indicators"][strat]["ema_50"].append(None)
+                    result["indicators"][strat]["ema_60"].append(None)
+                    result["indicators"][strat]["ema_200"].append(None)
+                    result["indicators"][strat]["ema_300"].append(None)
+                    result["indicators"][strat]["bullish_count"].append(None)
+                    result["indicators"][strat]["bearish_count"].append(None)
+
+    return result
+
+
+def _get_latest_signal_from_stored(db: Session, stock_id: int, timeframe: TimeFrame, strategy: str) -> Dict:
+    """Get the latest signal for a strategy from stored indicator values"""
+    from sqlalchemy import desc
+
+    # Get the latest candle with indicator
+    latest_candle = (
+        db.query(Candle)
+        .filter(Candle.stock_id == stock_id, Candle.timeframe == timeframe)
+        .order_by(desc(Candle.timestamp))
+        .first()
+    )
+
+    if not latest_candle:
+        return None
+
+    # Get indicator value for this candle
+    indicator = (
+        db.query(IndicatorValue)
+        .filter(
+            IndicatorValue.candle_id == latest_candle.id,
+            IndicatorValue.strategy == strategy.upper()
+        )
+        .first()
+    )
+
+    if not indicator:
+        return None
+
+    # Build result based on strategy
+    result = {
+        "strategy": strategy.upper(),
+        "signal": indicator.signal or "HOLD",
+        "strength": indicator.strength or 50,
+        "timestamp": latest_candle.timestamp.isoformat(),
+        "indicators": {}
+    }
+
+    if strategy.upper() == "MACD":
+        result["indicators"] = {
+            "macd_line": indicator.macd_line,
+            "macd_signal": indicator.macd_signal,
+            "histogram": indicator.macd_histogram
+        }
+        result["reason"] = f"MACD histogram: {indicator.macd_histogram:.4f}" if indicator.macd_histogram else "MACD"
+    elif strategy.upper() == "RSI":
+        result["indicators"] = {"rsi": indicator.rsi_value}
+        result["reason"] = f"RSI: {indicator.rsi_value:.2f}" if indicator.rsi_value else "RSI"
+    elif strategy.upper() == "MA_CROSSOVER":
+        result["indicators"] = {
+            "short_ma": indicator.short_ma,
+            "long_ma": indicator.long_ma
+        }
+        result["reason"] = f"Short MA: {indicator.short_ma:.2f}, Long MA: {indicator.long_ma:.2f}" if indicator.short_ma else "MA Crossover"
+    elif strategy.upper() == "BOLLINGER":
+        result["indicators"] = {
+            "upper": indicator.bb_upper,
+            "middle": indicator.bb_middle,
+            "lower": indicator.bb_lower,
+            "percent_b": indicator.bb_percent_b
+        }
+        result["reason"] = f"%B: {indicator.bb_percent_b:.2f}" if indicator.bb_percent_b else "Bollinger Bands"
+    elif strategy.upper() == "MTF_EMA":
+        result["indicators"] = {
+            "ema_20": indicator.ema_20,
+            "ema_50": indicator.ema_50,
+            "ema_200": indicator.ema_200,
+            "bullish_count": indicator.bullish_count,
+            "bearish_count": indicator.bearish_count
+        }
+        result["reason"] = f"Bullish: {indicator.bullish_count}, Bearish: {indicator.bearish_count}"
+
+    return result
+
+
 def _get_mtf_candle_data(db: Session, stock_id: int) -> Dict:
     """Fetch candle data for all 10 timeframes for MTF_EMA strategy"""
     import pandas as pd
@@ -514,6 +806,129 @@ def list_strategies():
             for name, strat_class in STRATEGIES.items()
         ]
     }
+
+
+# ============ STORED INDICATORS API ============
+@app.get("/indicators/{symbol}", tags=["Indicators"])
+def get_stored_indicators(
+    symbol: str,
+    timeframe: str = "1d",
+    strategy: Optional[str] = None,
+    limit: int = Query(default=500, le=2000),
+    db: Session = Depends(get_db)
+):
+    """
+    Get stored indicator values for chart rendering.
+    This endpoint reads pre-calculated values from the database (faster than recalculating).
+
+    Returns candles with their associated indicator values for charting.
+    """
+    stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+    if not stock:
+        raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
+
+    tf_map = {
+        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
+        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
+        "1d": TimeFrame.D1
+    }
+    tf = tf_map.get(timeframe)
+    if not tf:
+        raise HTTPException(status_code=400, detail="Invalid timeframe")
+
+    result = _get_stored_indicator_values(db, stock.id, tf, strategy, limit)
+
+    if not result:
+        raise HTTPException(status_code=404, detail="No indicator data found. Sync candles first.")
+
+    return {
+        "symbol": symbol.upper(),
+        "timeframe": timeframe,
+        "candle_count": len(result.get("candles", [])),
+        "strategies": list(result.get("indicators", {}).keys()),
+        **result
+    }
+
+
+@app.get("/signals-fast/{symbol}", tags=["Signals"])
+def get_signals_fast(
+    symbol: str,
+    timeframe: str = "1d",
+    strategy: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get trading signals from stored indicator values (faster than /signals).
+    Uses pre-calculated values instead of recalculating on each request.
+    """
+    from strategies import STRATEGIES
+
+    stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
+    if not stock:
+        raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
+
+    tf_map = {
+        "1m": TimeFrame.M1, "5m": TimeFrame.M5, "15m": TimeFrame.M15, "30m": TimeFrame.M30,
+        "1h": TimeFrame.H1, "2h": TimeFrame.H2, "3h": TimeFrame.H3, "4h": TimeFrame.H4, "5h": TimeFrame.H5,
+        "1d": TimeFrame.D1
+    }
+    tf = tf_map.get(timeframe)
+    if not tf:
+        raise HTTPException(status_code=400, detail="Invalid timeframe")
+
+    # Get current price from latest candle
+    from sqlalchemy import desc
+    latest_candle = (
+        db.query(Candle)
+        .filter(Candle.stock_id == stock.id, Candle.timeframe == tf)
+        .order_by(desc(Candle.timestamp))
+        .first()
+    )
+    current_price = latest_candle.close if latest_candle else 0
+
+    if strategy:
+        # Single strategy
+        result = _get_latest_signal_from_stored(db, stock.id, tf, strategy)
+        if not result:
+            raise HTTPException(status_code=404, detail=f"No stored indicators for {strategy}")
+
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "current_price": round(current_price, 2),
+            "signals": [result]
+        }
+    else:
+        # All strategies
+        signals = []
+        for name in STRATEGIES.keys():
+            result = _get_latest_signal_from_stored(db, stock.id, tf, name)
+            if result:
+                signals.append(result)
+
+        if not signals:
+            raise HTTPException(status_code=404, detail="No stored indicators found. Sync candles first.")
+
+        # Calculate overall recommendation
+        buy_count = sum(1 for s in signals if s["signal"] == "BUY")
+        sell_count = sum(1 for s in signals if s["signal"] == "SELL")
+
+        if buy_count > sell_count:
+            overall = "BUY"
+        elif sell_count > buy_count:
+            overall = "SELL"
+        else:
+            overall = "HOLD"
+
+        return {
+            "symbol": symbol.upper(),
+            "timeframe": timeframe,
+            "current_price": round(current_price, 2),
+            "overall_signal": overall,
+            "buy_signals": buy_count,
+            "sell_signals": sell_count,
+            "signals": signals
+        }
 
 
 # ============ STRATEGY SETTINGS ============

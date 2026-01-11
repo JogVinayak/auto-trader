@@ -148,18 +148,19 @@
   right: 180px; /* Move left to avoid overlapping price display */
   z-index: 100;
   max-width: 650px;
+  /* No background here - let the dashboard itself have the background so it moves when dragged */
+  pointer-events: none; /* Allow clicks to pass through to chart */
+}
+
+.mtf-dashboard-modal-overlay .mtf-dashboard {
+  margin: 0;
+  padding: 12px;
   background: rgba(15, 23, 42, 0.95);
   border-radius: 8px;
   border: 1px solid var(--border);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(8px);
-}
-
-.mtf-dashboard-modal-overlay .mtf-dashboard {
-  margin: 0;
-  background: transparent;
-  border: none;
-  padding: 12px;
+  pointer-events: auto; /* Re-enable pointer events on the dashboard itself */
 }
 
 .mtf-dashboard-modal-overlay .mtf-header {

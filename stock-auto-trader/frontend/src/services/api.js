@@ -39,7 +39,16 @@ export const candlesAPI = {
 export const signalsAPI = {
   get: (symbol, timeframe = '1d', strategy = null) =>
     api.get(`/signals/${symbol}`, { params: { timeframe, strategy } }),
+  // Fast version using stored indicator values (no recalculation)
+  getFast: (symbol, timeframe = '1d', strategy = null) =>
+    api.get(`/signals-fast/${symbol}`, { params: { timeframe, strategy } }),
   getStrategies: () => api.get('/strategies'),
+};
+
+// Indicators API - for chart rendering using stored values
+export const indicatorsAPI = {
+  get: (symbol, timeframe = '1d', strategy = null, limit = 500) =>
+    api.get(`/indicators/${symbol}`, { params: { timeframe, strategy, limit } }),
 };
 
 // Strategy Settings API

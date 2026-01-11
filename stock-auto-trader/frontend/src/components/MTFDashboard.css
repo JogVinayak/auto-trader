@@ -113,6 +113,50 @@
   color: var(--text-secondary);
 }
 
+/* Draggable dashboard styles */
+.mtf-dashboard.draggable {
+  position: relative;
+  user-select: none;
+}
+
+.mtf-dashboard.dragging {
+  opacity: 0.9;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.mtf-drag-handle {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 20px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: grab;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+  z-index: 10;
+}
+
+.mtf-drag-handle:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-color: var(--accent-blue);
+}
+
+.mtf-drag-handle:active {
+  cursor: grabbing;
+}
+
+.mtf-dashboard.draggable .mtf-summary {
+  padding-top: 16px;
+}
+
 @media (max-width: 768px) {
   .mtf-table {
     font-size: 10px;

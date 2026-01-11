@@ -144,6 +144,22 @@ const Dashboard = () => {
     }
   };
 
+  // Callback to refresh stocks list after add/delete
+  const handleStocksChange = async () => {
+    try {
+      console.log('🔄 Refreshing stocks list...');
+      const stocksRes = await stocksAPI.getAll();
+      const stockData = stocksRes.data.map((s) => ({
+        ...s,
+        change: (Math.random() * 4 - 2).toFixed(2),
+      }));
+      console.log('✅ Stocks refreshed:', stockData);
+      setStocks(stockData);
+    } catch (error) {
+      console.error('Error refreshing stocks:', error);
+    }
+  };
+
   const filteredSignals = signals.filter((signal) =>
     selectedStrategies.includes(signal.strategy)
   );
@@ -179,6 +195,7 @@ const Dashboard = () => {
         selectedStrategies={selectedStrategies}
         onToggleStrategy={handleToggleStrategy}
         onSettingsSaved={handleSettingsSaved}
+        onStocksChange={handleStocksChange}
       />
 
       <main className="main-content">

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict
 from models import Stock, Candle, TimeFrame
+from services.binance_service import is_crypto_symbol, fetch_binance_candles
 
 
 # Timeframe mapping for Yahoo Finance API
@@ -67,8 +68,12 @@ def fetch_candles_from_yahoo_api(
     timeframe: TimeFrame,
     start_timestamp: Optional[int] = None
 ) -> List[Dict]:
-    """Fetch candles from Yahoo Finance API directly"""
-    # Check if this timeframe needs resampling
+    """Fetch candles from Yahoo Finance API or Binance for crypto"""
+    # Use Binance for cryptocurrency symbols (proper OHLC data)
+    if is_crypto_symbol(symbol):
+        return fetch_binance_candles(symbol, timeframe, start_timestamp)
+
+    # Check if this timeframe needs resampling (for non-crypto via Yahoo)
     if timeframe in RESAMPLE_TIMEFRAMES:
         return _fetch_and_resample_candles(symbol, timeframe, start_timestamp)
 

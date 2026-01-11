@@ -181,11 +181,126 @@
   font-family: 'JetBrains Mono', monospace;
 }
 
+.no-stocks-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
 .no-stocks {
-  padding: 20px;
   text-align: center;
   color: var(--text-secondary);
   font-size: 14px;
+}
+
+.add-stock-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, var(--accent-green), #059669);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.add-stock-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
+.add-stock-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.stock-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.delete-stock-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0;
+}
+
+.stock-item:hover .delete-stock-btn {
+  opacity: 1;
+}
+
+.delete-stock-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+}
+
+.delete-confirm {
+  display: flex;
+  gap: 4px;
+}
+
+.confirm-delete-btn,
+.cancel-delete-btn {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.confirm-delete-btn {
+  background: var(--accent-red);
+  border: none;
+  color: white;
+}
+
+.confirm-delete-btn:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.confirm-delete-btn:disabled {
+  opacity: 0.7;
+}
+
+.cancel-delete-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.cancel-delete-btn:hover {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .strategy-filter {

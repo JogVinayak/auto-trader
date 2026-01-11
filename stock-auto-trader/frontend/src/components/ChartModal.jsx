@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Maximize2, RefreshCw, ChevronDown } from 'lucide-react';
 import TradingChartWithIndicators from './TradingChartWithIndicators';
 import MTFDashboard from './MTFDashboard';
-import { candlesAPI, signalsAPI } from '../services/api';
+import { candlesAPI, indicatorsAPI, signalsAPI } from '../services/api';
 import './ChartModal.css';
 
 const TIMEFRAMES = [
@@ -37,40 +37,157 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles: initialCandles
     }
   }, []);
 
-  // Fetch candles for selected timeframe
+  // Fetch candles and indicators for selected timeframe
   const fetchCandlesForTimeframe = useCallback(async (timeframe) => {
     if (!symbol) return;
 
     try {
       setLoading(true);
-      console.log(`📊 Fetching ${timeframe} candles for ${symbol}...`);
+      console.log(`📊 Fetching ${timeframe} data for ${symbol}...`);
 
-      // Fetch candles for the timeframe
-      const candlesRes = await candlesAPI.get(symbol, timeframe, 200);
+      // Use stored indicators API - fetches both candles and pre-calculated indicators
+      try {
+        const indicatorsRes = await indicatorsAPI.get(symbol, timeframe, strategy, 200);
+        const { candles, indicators } = indicatorsRes.data;
 
-      if (candlesRes.data && candlesRes.data.length > 0) {
-        console.log(`✅ Loaded ${candlesRes.data.length} candles for ${timeframe}`);
-        setChartCandles(candlesRes.data);
+        if (candles && candles.length > 0) {
+          console.log(`✅ Loaded ${candles.length} candles with stored indicators for ${timeframe}`);
+          setChartCandles(candles);
 
-        // Also fetch signals for this timeframe
-        try {
-          const signalsRes = await signalsAPI.get(symbol, timeframe, strategy);
-          const signals = signalsRes.data.signals || [];
-          const strategySignal = signals.find(s => s.strategy === strategy);
-          if (strategySignal) {
-            setChartSignal(strategySignal);
+          // Build signal object from stored indicators for this strategy
+          const strategyIndicators = indicators?.[strategy] || {};
+          if (strategyIndicators.signal && strategyIndicators.signal.length > 0) {
+            const lastIdx = strategyIndicators.signal.length - 1;
+            const signalValue = strategyIndicators.signal[lastIdx];
+            const strength = strategyIndicators.strength?.[lastIdx] || 50;
+
+            // Build indicators object for chart rendering
+            const chartIndicators = {
+              timestamps: strategyIndicators.timestamps || [],
+            };
+
+            // Get the last candle price
+            const lastCandle = candles[candles.length - 1];
+            const price = lastCandle?.close;
+
+            // Add strategy-specific indicator data
+            if (strategy === 'MACD') {
+              chartIndicators.macd_line = strategyIndicators.macd_line || [];
+              chartIndicators.signal_line = strategyIndicators.macd_signal || [];
+              chartIndicators.histogram_line = strategyIndicators.macd_histogram || [];
+              // Add scalar values for display
+              chartIndicators.price = price;
+              chartIndicators.macd = strategyIndicators.macd_line?.[lastIdx];
+              chartIndicators.signal = strategyIndicators.macd_signal?.[lastIdx];
+              chartIndicators.histogram = strategyIndicators.macd_histogram?.[lastIdx];
+            } else if (strategy === 'RSI') {
+              chartIndicators.rsi_line = strategyIndicators.rsi_value || [];
+              // Add scalar values for display
+              chartIndicators.price = price;
+              chartIndicators.rsi = strategyIndicators.rsi_value?.[lastIdx];
+            } else if (strategy === 'MA_CROSSOVER') {
+              chartIndicators.short_ma_line = strategyIndicators.short_ma || [];
+              chartIndicators.long_ma_line = strategyIndicators.long_ma || [];
+              // Add scalar values for display
+              chartIndicators.price = price;
+              chartIndicators.short_ma = strategyIndicators.short_ma?.[lastIdx];
+              chartIndicators.long_ma = strategyIndicators.long_ma?.[lastIdx];
+            } else if (strategy === 'BOLLINGER') {
+              chartIndicators.upper_band_line = strategyIndicators.bb_upper || [];
+              chartIndicators.middle_band_line = strategyIndicators.bb_middle || [];
+              chartIndicators.lower_band_line = strategyIndicators.bb_lower || [];
+              // Add scalar values for display
+              chartIndicators.price = price;
+              chartIndicators.upper_band = strategyIndicators.bb_upper?.[lastIdx];
+              chartIndicators.middle_band = strategyIndicators.bb_middle?.[lastIdx];
+              chartIndicators.lower_band = strategyIndicators.bb_lower?.[lastIdx];
+              chartIndicators.percent_b = strategyIndicators.bb_percent_b?.[lastIdx];
+              // Calculate bandwidth percentage
+              const upper = strategyIndicators.bb_upper?.[lastIdx];
+              const lower = strategyIndicators.bb_lower?.[lastIdx];
+              const middle = strategyIndicators.bb_middle?.[lastIdx];
+              if (upper && lower && middle) {
+                chartIndicators.bandwidth_pct = ((upper - lower) / middle * 100);
+              }
+            } else if (strategy === 'MTF_EMA') {
+              const emaPeriods = [20, 30, 40, 50, 60, 200, 300];
+              chartIndicators.ema_lines = {
+                ema_20: strategyIndicators.ema_20 || [],
+                ema_30: strategyIndicators.ema_30 || [],
+                ema_40: strategyIndicators.ema_40 || [],
+                ema_50: strategyIndicators.ema_50 || [],
+                ema_60: strategyIndicators.ema_60 || [],
+                ema_200: strategyIndicators.ema_200 || [],
+                ema_300: strategyIndicators.ema_300 || [],
+              };
+              // Calculate ema_trends from the stored values (EMA > EMA[2-bars-ago] = bullish)
+              chartIndicators.ema_trends = {};
+              emaPeriods.forEach(period => {
+                const emaKey = `ema_${period}`;
+                const emaValues = strategyIndicators[emaKey] || [];
+                if (emaValues.length >= 3) {
+                  const current = emaValues[emaValues.length - 1];
+                  const prev2 = emaValues[emaValues.length - 3];
+                  chartIndicators.ema_trends[emaKey] = current > prev2;
+                } else {
+                  chartIndicators.ema_trends[emaKey] = true; // default bullish
+                }
+              });
+              chartIndicators.bullish_count = strategyIndicators.bullish_count?.[lastIdx];
+              chartIndicators.bearish_count = strategyIndicators.bearish_count?.[lastIdx];
+
+              // Fetch full MTF dashboard from signals API (contains all timeframes)
+              try {
+                const mtfSignalsRes = await signalsAPI.get(symbol, '1d', 'MTF_EMA');
+                const mtfSignals = mtfSignalsRes.data.signals || [];
+                const mtfSignal = mtfSignals.find(s => s.strategy === 'MTF_EMA');
+                if (mtfSignal?.indicators?.trend_dashboard) {
+                  chartIndicators.trend_dashboard = mtfSignal.indicators.trend_dashboard;
+                  chartIndicators.bullish_count = mtfSignal.indicators.bullish_count;
+                  chartIndicators.bearish_count = mtfSignal.indicators.bearish_count;
+                  chartIndicators.total_cells = mtfSignal.indicators.total_cells;
+                }
+              } catch (mtfError) {
+                console.log('Could not fetch MTF dashboard:', mtfError.message);
+              }
+            }
+
+            setChartSignal({
+              strategy,
+              signal: signalValue || 'HOLD',
+              strength,
+              indicators: chartIndicators,
+            });
           }
-        } catch (signalError) {
-          console.log('ℹ️ Could not fetch signals for timeframe:', signalError.message);
+        } else {
+          console.log(`⚠️ No ${timeframe} data available for ${symbol}`);
+          setChartCandles([]);
         }
-      } else {
-        // No data available, show empty and offer to sync
-        console.log(`⚠️ No ${timeframe} data available for ${symbol}`);
-        setChartCandles([]);
+      } catch (indicatorError) {
+        console.log('Stored indicators not available, falling back to candles API:', indicatorError.message);
+        // Fallback to regular candles API if stored indicators not available
+        const candlesRes = await candlesAPI.get(symbol, timeframe, 200);
+        if (candlesRes.data && candlesRes.data.length > 0) {
+          console.log(`✅ Loaded ${candlesRes.data.length} candles for ${timeframe} (fallback)`);
+          setChartCandles(candlesRes.data);
+          // Try to get signals the old way as fallback
+          try {
+            const signalsRes = await signalsAPI.get(symbol, timeframe, strategy);
+            const signals = signalsRes.data.signals || [];
+            const strategySignal = signals.find(s => s.strategy === strategy);
+            if (strategySignal) {
+              setChartSignal(strategySignal);
+            }
+          } catch (signalError) {
+            console.log('ℹ️ Could not fetch signals for timeframe:', signalError.message);
+          }
+        } else {
+          console.log(`⚠️ No ${timeframe} data available for ${symbol}`);
+          setChartCandles([]);
+        }
       }
     } catch (error) {
-      console.error(`Error fetching ${timeframe} candles:`, error);
-      // If 400 error (insufficient data), show empty state
+      console.error(`Error fetching ${timeframe} data:`, error);
       if (error.response?.status === 400) {
         setChartCandles([]);
       }
@@ -233,15 +350,17 @@ const ChartModal = ({ isOpen, onClose, strategy, signal, candles: initialCandles
         </div>
 
         <div className="chart-modal-body" ref={chartBodyRef}>
-          {/* MTF Dashboard for MTF_EMA strategy - positioned top right */}
-          {strategy === 'MTF_EMA' && chartSignal?.indicators?.trend_dashboard && (
+          {/* MTF Dashboard for MTF_EMA strategy - positioned top right, draggable */}
+          {strategy === 'MTF_EMA' && (chartSignal?.indicators?.trend_dashboard || chartSignal?.indicators?.bullish_count !== undefined || chartSignal?.indicators?.ema_trends) && (
             <div className="mtf-dashboard-modal-overlay">
               <MTFDashboard
                 trendDashboard={chartSignal.indicators.trend_dashboard}
                 bullishCount={chartSignal.indicators.bullish_count}
                 bearishCount={chartSignal.indicators.bearish_count}
                 totalCells={chartSignal.indicators.total_cells}
-                compact={true}
+                emaTrends={chartSignal.indicators.ema_trends}
+                currentTimeframe={selectedTimeframe}
+                draggable={true}
               />
             </div>
           )}

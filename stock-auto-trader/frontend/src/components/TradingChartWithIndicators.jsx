@@ -53,6 +53,33 @@ const TradingChartWithIndicators = ({
       return aligned.sort((a, b) => a.time - b.time);
     };
 
+    // Helper to calculate EMA from candle data
+    const calculateEMA = (closes, period) => {
+      if (closes.length < period) return [];
+
+      const multiplier = 2 / (period + 1);
+      const emaValues = [];
+
+      // Calculate initial SMA for the first EMA value
+      let sum = 0;
+      for (let i = 0; i < period; i++) {
+        sum += closes[i];
+        emaValues.push(null); // No EMA for first period-1 values
+      }
+
+      // First EMA is the SMA
+      let ema = sum / period;
+      emaValues[period - 1] = ema;
+
+      // Calculate subsequent EMAs
+      for (let i = period; i < closes.length; i++) {
+        ema = (closes[i] - ema) * multiplier + ema;
+        emaValues.push(ema);
+      }
+
+      return emaValues;
+    };
+
     const chartOptions = {
       layout: {
         background: { color: '#1a2234' },
@@ -245,18 +272,26 @@ const TradingChartWithIndicators = ({
         if (lowerData.length > 0) lowerBandSeries.setData(lowerData);
       }
 
-      // MTF_EMA - 7 EMA lines with dynamic colors
-      if (strategyName === 'MTF_EMA' && indicators.ema_lines && indicators.ema_trends) {
+      // MTF_EMA - 7 EMA lines calculated from current timeframe candle data
+      if (strategyName === 'MTF_EMA') {
         const emaPeriods = [20, 30, 40, 50, 60, 200, 300];
         const bullishColor = '#10b981';  // lime/green
         const bearishColor = '#a855f7';  // purple
 
-        emaPeriods.forEach((period) => {
-          const emaKey = `ema_${period}`;
-          const emaValues = indicators.ema_lines[emaKey];
-          const isBullish = indicators.ema_trends[emaKey];
+        // Extract close prices from candle data
+        const closes = data.map(candle => candle.close);
 
-          if (emaValues && emaValues.length > 0) {
+        emaPeriods.forEach((period) => {
+          // Calculate EMA from candle data for this timeframe
+          const emaValues = calculateEMA(closes, period);
+
+          if (emaValues.length > 0) {
+            // Determine trend: EMA > EMA[2 bars ago] = bullish
+            const lastIdx = emaValues.length - 1;
+            const current = emaValues[lastIdx];
+            const prev2 = lastIdx >= 2 ? emaValues[lastIdx - 2] : current;
+            const isBullish = current !== null && prev2 !== null && current > prev2;
+
             const emaSeries = priceChart.addLineSeries({
               color: isBullish ? bullishColor : bearishColor,
               lineWidth: period >= 200 ? 2 : 1,
@@ -265,33 +300,60 @@ const TradingChartWithIndicators = ({
               lastValueVisible: period === 200 || period === 300,
             });
 
-            const emaData = alignIndicatorData(emaValues, timestamps);
+            // Build EMA data aligned with candle timestamps
+            const emaData = [];
+            for (let i = 0; i < emaValues.length; i++) {
+              if (emaValues[i] !== null && formattedData[i]) {
+                emaData.push({
+                  time: formattedData[i].time,
+                  value: emaValues[i],
+                });
+              }
+            }
+
             if (emaData.length > 0) emaSeries.setData(emaData);
           }
         });
 
-        // Add crossover markers
-        if (indicators.crossover_signals && indicators.crossover_signals.length > 0) {
-          const crossoverMarkers = indicators.crossover_signals.map(signal => {
-            const idx = signal.index;
-            if (idx >= 0 && idx < formattedData.length) {
-              return {
-                time: formattedData[idx].time,
-                position: signal.type === 'up' ? 'belowBar' : 'aboveBar',
-                color: signal.type === 'up' ? bullishColor : bearishColor,
-                shape: signal.type === 'up' ? 'arrowUp' : 'arrowDown',
-                text: `EMA${signal.ema}`,
-                size: 1,
-              };
-            }
-            return null;
-          }).filter(m => m !== null);
+        // Add crossover markers (detect EMA crossing its 2-bar-ago value)
+        const crossoverMarkers = [];
+        emaPeriods.forEach((period) => {
+          const emaValues = calculateEMA(closes, period);
+          for (let i = 3; i < emaValues.length; i++) {
+            if (emaValues[i] === null || emaValues[i - 2] === null) continue;
+            if (emaValues[i - 1] === null || emaValues[i - 3] === null) continue;
 
-          if (crossoverMarkers.length > 0) {
-            // Merge with existing markers
-            const allMarkers = [...markers, ...crossoverMarkers];
-            candlestickSeries.setMarkers(allMarkers.sort((a, b) => a.time - b.time));
+            const prevCross = emaValues[i - 1] > emaValues[i - 3];
+            const currCross = emaValues[i] > emaValues[i - 2];
+
+            // Crossover up: was below, now above
+            if (!prevCross && currCross && formattedData[i]) {
+              crossoverMarkers.push({
+                time: formattedData[i].time,
+                position: 'belowBar',
+                color: bullishColor,
+                shape: 'arrowUp',
+                text: `EMA${period}`,
+                size: 1,
+              });
+            }
+            // Crossover down: was above, now below
+            else if (prevCross && !currCross && formattedData[i]) {
+              crossoverMarkers.push({
+                time: formattedData[i].time,
+                position: 'aboveBar',
+                color: bearishColor,
+                shape: 'arrowDown',
+                text: `EMA${period}`,
+                size: 1,
+              });
+            }
           }
+        });
+
+        if (crossoverMarkers.length > 0) {
+          const allMarkers = [...markers, ...crossoverMarkers];
+          candlestickSeries.setMarkers(allMarkers.sort((a, b) => a.time - b.time));
         }
       }
     }
